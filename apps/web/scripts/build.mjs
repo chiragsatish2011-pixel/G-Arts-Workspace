@@ -16,6 +16,17 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(appRoot, "..", "..");
+
+/**
+ * The bundle is written to `dist/` at the repository root rather than inside
+ * the app. Vercel looks for an output directory by name, and a project
+ * created from its own detection defaults to "dist" — which took precedence
+ * over `outputDirectory` in vercel.json and failed the deploy after a
+ * successful build. Building where it already looks means the two cannot
+ * disagree again.
+ */
+const outDir = path.join(repoRoot, "dist");
 
 let build;
 try {
@@ -32,4 +43,4 @@ try {
 
 // `root` is passed explicitly so the build does not depend on the working
 // directory the caller happened to use.
-await build({ root: appRoot });
+await build({ root: appRoot, build: { outDir, emptyOutDir: true } });

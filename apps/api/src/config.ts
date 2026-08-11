@@ -9,6 +9,13 @@ loadEnv({ path: path.resolve(here, "..", ".env") });
 const environment = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   DATABASE_URL: z.string().default("file:./dev.db"),
+  /**
+   * Turso, when deployed. libSQL is SQLite reached over HTTP, so the schema
+   * and every query stay exactly as they are — only the transport changes.
+   * Unset locally, where DATABASE_URL's file is used instead.
+   */
+  TURSO_DATABASE_URL: z.string().url().optional(),
+  TURSO_AUTH_TOKEN: z.string().min(1).optional(),
   JWT_SECRET: z.string().min(32).default("local-dev-garts-workspace-signing-secret-2026-only"),
   BOOTSTRAP_SECRET: z.string().min(16).default("local-bootstrap-garts-workspace-2026-secret"),
   PORT: z.coerce.number().int().positive().default(3002),
@@ -60,6 +67,11 @@ if (parsed.NODE_ENV === "production") {
    * resolves somewhere temporary, appears to work, and silently loses every
    * account the first time the process moves.
    */
+  if (parsed.TURSO_DATABASE_URL) {
+    if (!parsed.TURSO_AUTH_TOKEN) {
+      throw new Error("Refusing to start in production with TURSO_DATABASE_URL but no TURSO_AUTH_TOKEN.");
+    }
+  } else {
   const sqlite = parsed.DATABASE_URL.match(/^file:(.*)$/i);
   if (!sqlite) {
     throw new Error(
@@ -69,8 +81,10 @@ if (parsed.NODE_ENV === "production") {
   if (!path.isAbsolute(sqlite[1])) {
     throw new Error(
       "Refusing to start in production with a relative DATABASE_URL. Point it at an absolute path on a disk that survives a restart, " +
-        "for example file:/var/lib/g-arts/workspace.db. A relative path on an ephemeral filesystem loses every account without warning.",
+        "for example file:/var/lib/g-arts/workspace.db. A relative path on an ephemeral filesystem loses every account without warning. " +
+        "On a host with no disk of its own, set TURSO_DATABASE_URL instead.",
     );
+  }
   }
   if (!parsed.CORS_ORIGIN.startsWith("https://")) throw new Error("Refusing to start in production unless CORS_ORIGIN uses https://");
   if (!parsed.YOUTUBE_DATA_API_KEY) throw new Error("Refusing to start in production without YOUTUBE_DATA_API_KEY for the verified Bengaluru feed");

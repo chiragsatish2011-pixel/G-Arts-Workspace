@@ -19,7 +19,18 @@ import { prisma } from "../lib/prisma.js";
  */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const AVATAR_DIR = path.resolve(here, "..", "..", "uploads", "avatars");
+
+/**
+ * Where pictures are kept.
+ *
+ * The repository's own `uploads/` folder locally. On a serverless host the
+ * application directory is read-only, so `AVATAR_DIR` points at the one
+ * writable place — which is temporary, and why `BLOB_READ_WRITE_TOKEN` should
+ * be set there so uploads go to Vercel Blob and outlive the instance instead.
+ */
+const AVATAR_DIR =
+  process.env.AVATAR_DIR ??
+  (process.env.VERCEL ? "/tmp/g-arts/avatars" : path.resolve(here, "..", "..", "uploads", "avatars"));
 const MAX_BYTES = 8 * 1024 * 1024;
 const KEY = /^[0-9a-f-]{36}\.(jpg|png|webp|gif|avif)$/i;
 
@@ -43,7 +54,12 @@ export async function deleteAvatarFile(key: string) {
 }
 
 export const avatarRoutes: FastifyPluginAsync = async (app) => {
-  await mkdir(AVATAR_DIR, { recursive: true });
+  // Never fatal. This is one feature's storage, and failing to prepare it must
+  // not stop the whole API from starting — a read-only filesystem took every
+  // route down with it, including sign-in, which needs no disk at all.
+  await mkdir(AVATAR_DIR, { recursive: true }).catch((cause) => {
+    app.log.warn({ err: cause, dir: AVATAR_DIR }, "Profile pictures are unavailable: the upload directory could not be created");
+  });
 
   app.post("/me/avatar", { preHandler: authenticate }, async (request, reply) => {
     const part = await request.file();

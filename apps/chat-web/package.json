@@ -11,15 +11,15 @@
     "lint": "eslint src/"
   },
   "dependencies": {
+    "@g-arts/chat-shared": "*",
     "axios": "^1.7.4",
     "framer-motion": "^13.0.0",
     "lucide-react": "^0.427.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.0",
+    "react-router-dom": "^7.18.2",
     "socket.io-client": "^4.7.5",
-    "zustand": "^4.5.4",
-    "@g-arts/chat-shared": "*"
+    "zustand": "^4.5.4"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

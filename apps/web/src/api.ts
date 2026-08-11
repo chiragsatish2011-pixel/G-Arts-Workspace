@@ -1,9 +1,9 @@
 const API_URL = import.meta.env.VITE_API_URL ?? "/api";
 
 export type Role = "SUPER_ADMIN" | "ADMIN" | "TEAM_LEAD" | "MEMBER" | "TRAINEE" | "GUEST";
-export type Team = "G_ARTS" | "TRANSLATION";
-export type Member = { id: string; username: string; displayName: string; avatarUrl: string | null; accentColor: string | null; title: string | null; role: Role; team: Team; skills: string; availability: string; createdAt: string; deletedAt: string | null };
-export type Session = { token: string; user: Pick<Member, "id" | "username" | "displayName" | "avatarUrl" | "accentColor" | "title" | "role" | "team"> };
+export type Team = "G_ARTS" | "TRANSLATION" | "G_NEWS";
+export type Member = { id: string; username: string; displayName: string; avatarUrl: string | null; accentColor: string | null; title: string | null; role: Role; team: Team; skills: string; availability: string; createdAt: string; deletedAt: string | null; onboardingDismissedAt: string | null; onboardingCompletedAt: string | null };
+export type Session = { token: string; user: Pick<Member, "id" | "username" | "displayName" | "avatarUrl" | "accentColor" | "title" | "role" | "team" | "onboardingDismissedAt" | "onboardingCompletedAt"> };
 type Named = { displayName: string; username: string };
 /** `actor` and `target` are null when the account behind the id is gone. */
 export type AuditEntry = {
@@ -28,11 +28,11 @@ export async function request<T>(path: string, options: RequestInit = {}, token?
 
 export const login = (username: string, password: string) => request<Session>("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) });
 export const listMembers = (token: string) => request<Member[]>("/users", {}, token);
-export const addMember = (token: string, data: { username: string; displayName: string; title?: string; password: string; role: Role; team: Team }) => request<Member>("/users", { method: "POST", body: JSON.stringify(data) }, token);
+export const addMember = (token: string, data: { username: string; displayName: string; title?: string; role: Role; team: Team }) => request<Member>("/users", { method: "POST", body: JSON.stringify(data) }, token);
 export const updateRole = (token: string, id: string, role: Role) => request<Member>(`/users/${id}/role`, { method: "PATCH", body: JSON.stringify({ role, confirm: true }) }, token);
 export const updateMemberTeam = (token: string, id: string, team: Team) => request<Member>(`/users/${id}/team`, { method: "PATCH", body: JSON.stringify({ team, confirm: true }) }, token);
 export const setMemberAccess = (token: string, id: string, disabled: boolean) => request<Member>(`/users/${id}/access`, { method: "PATCH", body: JSON.stringify({ disabled, confirm: true }) }, token);
-export const resetMemberPassword = (token: string, id: string, newPassword: string) => request<void>(`/users/${id}/password`, { method: "POST", body: JSON.stringify({ newPassword, confirm: true }) }, token);
+export const resetMemberPassword = (token: string, id: string) => request<void>(`/users/${id}/password`, { method: "POST", body: JSON.stringify({ confirm: true }) }, token);
 export const listAudit = (token: string) => request<AuditEntry[]>("/admin/audit-log", {}, token);
 
 /**
@@ -54,6 +54,8 @@ export const updateMyProfile = (
 
 export const changeMyPassword = (token: string, currentPassword: string, newPassword: string) =>
   request<{ success: boolean }>("/users/me/password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) }, token);
+export const updateOnboarding = (token: string, status: "skipped" | "completed") =>
+  request<Session>("/users/me/onboarding", { method: "PATCH", body: JSON.stringify({ status }) }, token);
 
 export const uploadMyAvatar = async (token: string, file: File) => {
   const body = new FormData();
@@ -196,48 +198,17 @@ export const importFromCalendar = (token: string, entries: { uid: string; catego
     token,
   );
 
-// --- Projects and tasks -----------------------------------------------------
-
-export type Stage = "planned" | "capture" | "ready_for_edit" | "editing" | "review" | "approved" | "published" | "archived";
 export type TaskStatus = "not_done" | "submitted" | "approved";
 export type CompletionKind = "finished" | "not_required";
-export type GTask = { id: string; projectId: string | null; eventId?: string | null; copiedFromEventId?: string | null; title: string; status: TaskStatus; completionKind?: CompletionKind | null; assigneeId: string | null; dueAt: string | null; position: number; submittedAt?: string | null; approvedAt?: string | null; notRequiredAt?: string | null };
-export type GProject = {
-  id: string; eventId: string | null; name: string; type: string;
-  description: string | null; stage: Stage; dueAt: string | null; tasks: GTask[];
-};
-
-export const listProjects = (token: string, eventId?: string) =>
-  request<GProject[]>(`/projects${eventId ? `?eventId=${eventId}` : ""}`, {}, token);
-
-export const projectMeta = (token: string) =>
-  request<{ types: string[]; stages: Stage[]; taskStatuses: TaskStatus[] }>("/projects/meta", {}, token);
-
-export const createProject = (token: string, data: { name: string; type?: string; eventId?: string | null }) =>
-  request<GProject>("/projects", { method: "POST", body: JSON.stringify(data) }, token);
-
-export const updateProject = (token: string, id: string, data: { stage?: Stage; name?: string }) =>
-  request<GProject>(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(data) }, token);
-
-export const deleteProject = (token: string, id: string) =>
-  request<{ deleted: true; name: string }>(`/projects/${id}`, { method: "DELETE", body: JSON.stringify({ confirm: true }) }, token);
-
-export const addTask = (token: string, projectId: string, title: string) =>
-  request<GTask>(`/projects/${projectId}/tasks`, { method: "POST", body: JSON.stringify({ title }) }, token);
-
-export const updateTask = (token: string, taskId: string, data: { status?: TaskStatus; assigneeId?: string | null }) =>
-  request<GTask>(`/projects/tasks/${taskId}`, { method: "PATCH", body: JSON.stringify(data) }, token);
-
-export const deleteTask = (token: string, taskId: string) =>
-  request<{ deleted: true }>(`/projects/tasks/${taskId}`, { method: "DELETE" }, token);
+export type GTask = { id: string; eventId?: string | null; copiedFromEventId?: string | null; title: string; status: TaskStatus; completionKind?: CompletionKind | null; assigneeId: string | null; dueAt: string | null; position: number; submittedAt?: string | null; approvedAt?: string | null; notRequiredAt?: string | null };
 
 // --- Logbook ---------------------------------------------------------------
 
-export type LogbookEntry = { id: string; at: string; kind: "event" | "project" | "task"; title: string; detail: string; eventId?: string | null; projectId?: string | null };
+export type LogbookEntry = { id: string; at: string; kind: "event" | "task"; title: string; detail: string; eventId?: string | null };
 export const listLogbook = (token: string, eventId?: string) =>
   request<LogbookEntry[]>(`/logbook${eventId ? `?eventId=${eventId}` : ""}`, {}, token);
 
-// --- Shared library and Translation schedules -----------------------------
+// --- Shared library and Translation article tracker ------------------------
 
 export type LibraryKind = "MUSIC" | "VIDEO" | "LIVE";
 export type LibraryItem = { id: string; title: string; url: string; kind: LibraryKind; createdById: string; createdAt: string };
@@ -246,18 +217,16 @@ export const addLibraryItem = (token: string, data: { title: string; url: string
   request<LibraryItem>("/library", { method: "POST", body: JSON.stringify(data) }, token);
 export const deleteLibraryItem = (token: string, id: string) =>
   request<{ deleted: true; title: string }>(`/library/${id}`, { method: "DELETE", body: JSON.stringify({ confirm: true }) }, token);
+export type LatestLibraryItem = { id: string; title: string; url: string; publishedAt: string };
+export type LatestLibraryFeed = { status: "ready" | "unconfigured" | "unavailable"; windowDays: 15; sourceUrl: string; refreshedAt: string; video: LatestLibraryItem[]; live: LatestLibraryItem[]; message?: string };
+export const latestLibrary = (token: string) => request<LatestLibraryFeed>("/library/latest", {}, token);
 
-export type TranslationScheduleItem = {
-  id: string; ownerId: string; title: string; startsAt: string; status: "not_done" | "done"; doneAt: string | null;
-  owner?: { id: string; displayName: string; username: string };
-};
-export const listTranslationSchedule = (token: string) => request<TranslationScheduleItem[]>("/translation-schedule", {}, token);
-export const addTranslationScheduleItem = (token: string, data: { title: string; startsAt: string }) =>
-  request<TranslationScheduleItem>("/translation-schedule", { method: "POST", body: JSON.stringify(data) }, token);
-export const updateTranslationScheduleItem = (token: string, id: string, status: "not_done" | "done") =>
-  request<TranslationScheduleItem>(`/translation-schedule/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }, token);
-export const deleteTranslationScheduleItem = (token: string, id: string) =>
-  request<{ deleted: true }>(`/translation-schedule/${id}`, { method: "DELETE", body: JSON.stringify({ confirm: true }) }, token);
+export type GNewsTodo = { id: string; title: string; completedAt: string | null; createdAt: string };
+export const listGNewsTodos = (token: string) => request<GNewsTodo[]>("/g-news-todos", {}, token);
+export const addGNewsTodo = (token: string, title: string) => request<GNewsTodo>("/g-news-todos", { method: "POST", body: JSON.stringify({ title }) }, token);
+export const setGNewsTodoDone = (token: string, id: string, done: boolean) => request<GNewsTodo>(`/g-news-todos/${id}`, { method: "PATCH", body: JSON.stringify({ done }) }, token);
+export const deleteGNewsTodo = (token: string, id: string) => request<{ deleted: true }>(`/g-news-todos/${id}`, { method: "DELETE", body: JSON.stringify({ confirm: true }) }, token);
+
 
 export type TranslationArticleDay = {
   id: string; weekday: number; whatDid: string | null; whatsNext: string | null; readingProgress: string | null; writingProgress: string | null;

@@ -7,11 +7,10 @@ import { adminRoutes } from "./routes/admin.js";
 import { userRoutes } from "./routes/users.js";
 import { avatarRoutes } from "./routes/avatars.js";
 import { eventRoutes } from "./routes/events.js";
-import { projectRoutes } from "./routes/projects.js";
 import { logbookRoutes } from "./routes/logbook.js";
 import { libraryRoutes } from "./routes/library.js";
-import { translationScheduleRoutes } from "./routes/translation-schedule.js";
 import { translationWeeksRoutes } from "./routes/translation-weeks.js";
+import { gNewsTodoRoutes } from "./routes/g-news-todos.js";
 import multipart from "@fastify/multipart";
 
 export function buildApp() {
@@ -46,10 +45,9 @@ export function buildApp() {
   app.register(avatarRoutes, { prefix: "/api/users" });
   app.register(adminRoutes, { prefix: "/api/admin" });
   app.register(eventRoutes, { prefix: "/api/events" });
-  app.register(projectRoutes, { prefix: "/api/projects" });
   app.register(logbookRoutes, { prefix: "/api/logbook" });
   app.register(libraryRoutes, { prefix: "/api/library" });
-  app.register(translationScheduleRoutes, { prefix: "/api/translation-schedule" });
   app.register(translationWeeksRoutes, { prefix: "/api/translation-weeks" });
+  app.register(gNewsTodoRoutes, { prefix: "/api/g-news-todos" });
   return app;
 }

@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { ConfirmDialog, PromptDialog, type ConfirmRequest, type PromptRequest } from "./Modal";
+import { ConfirmDialog, type ConfirmRequest } from "./Modal";
 import {
   addMember, deleteMember, listAudit, listMembers, resetMemberPassword, setMemberAccess, updateMemberTeam, updateRole,
   type AuditEntry, type Member, type Role, type Session, type Team,
 } from "./api";
 
 const roles: Role[] = ["ADMIN", "TEAM_LEAD", "MEMBER", "TRAINEE", "GUEST"];
-const teams: Team[] = ["G_ARTS", "TRANSLATION"];
-const readableTeam = (team: Team) => team === "G_ARTS" ? "G-Arts" : "Translation";
+const teams: Team[] = ["G_ARTS", "TRANSLATION", "G_NEWS"];
+const chatOnlyRoles: Role[] = ["MEMBER", "TRAINEE", "GUEST"];
+const readableTeam = (team: Team) => team === "G_ARTS" ? "G-Arts" : team === "TRANSLATION" ? "Translation" : "G-News · Chat only";
 
 /** Whether the security log is left open, remembered between visits. */
 const AUDIT_OPEN = "g-arts.audit-open";
@@ -62,10 +63,9 @@ export function AdminPanel({ session }: { session: Session }) {
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [notice, setNotice] = useState("");
   const [query, setQuery] = useState("");
-  const [form, setForm] = useState({ displayName: "", username: "", title: "", password: "", role: "MEMBER" as Role, team: "G_ARTS" as Team });
+  const [form, setForm] = useState({ displayName: "", username: "", title: "", role: "MEMBER" as Role, team: "G_ARTS" as Team });
   const [showAudit, setShowAudit] = useState(() => localStorage.getItem(AUDIT_OPEN) === "yes");
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
-  const [prompt, setPrompt] = useState<PromptRequest | null>(null);
 
   const isSuperAdmin = session.user.role === "SUPER_ADMIN";
 
@@ -94,16 +94,13 @@ export function AdminPanel({ session }: { session: Session }) {
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    // Captured before the form is cleared, so the confirmation can repeat the
-    // exact credentials to hand over rather than leaving the administrator to
-    // remember what they just typed.
-    const handed = { username: form.username, password: form.password };
+    const handed = { username: form.username };
     void act(
       async () => {
         await addMember(session.token, form);
-        setForm({ displayName: "", username: "", title: "", password: "", role: "MEMBER", team: "G_ARTS" });
+        setForm({ displayName: "", username: "", title: "", role: "MEMBER", team: "G_ARTS" });
       },
-      `@${handed.username} can now sign in with the password ${handed.password}. They can change it under Profile.`,
+      `@${handed.username} can now sign in with the temporary password gurukul. They should change it under Account.`,
     );
   };
 
@@ -151,16 +148,14 @@ export function AdminPanel({ session }: { session: Session }) {
             <label>Team title
               <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Photographer" />
             </label>
-            <label>Temporary password
-              <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} minLength={4} required />
-            </label>
+            <p className="admin-password-note">New accounts start with the temporary password <strong>gurukul</strong>. Only the member chooses a replacement in Account.</p>
             <label>Workspace role
               <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>
-                {roles.map((role) => <option key={role}>{role}</option>)}
+                {(form.team === "G_NEWS" ? chatOnlyRoles : roles).map((role) => <option key={role}>{role}</option>)}
               </select>
             </label>
             <label>Workspace type
-              <select value={form.team} onChange={(e) => setForm({ ...form, team: e.target.value as Team })}>
+              <select value={form.team} onChange={(e) => { const team = e.target.value as Team; setForm({ ...form, team, role: team === "G_NEWS" ? "MEMBER" : form.role }); }}>
                 {teams.map((team) => <option key={team} value={team}>{readableTeam(team)}</option>)}
               </select>
             </label>
@@ -169,7 +164,7 @@ export function AdminPanel({ session }: { session: Session }) {
         </form>
       ) : (
         <p className="admin-readonly">
-          You can review members with your administrator role. Only a super-admin can change access, roles, or passwords.
+          You can review members and reset a lower-level member's password to the standard temporary password. Only a super-admin can change access, roles, or workspace type.
         </p>
       )}
 
@@ -187,9 +182,11 @@ export function AdminPanel({ session }: { session: Session }) {
                   member={member}
                   session={session}
                   editable={isSuperAdmin}
+                  canResetPassword={isSuperAdmin
+                    ? member.role !== "SUPER_ADMIN"
+                    : session.user.role === "ADMIN" && ["TEAM_LEAD", "MEMBER", "TRAINEE", "GUEST"].includes(member.role)}
                   act={act}
                   ask={setConfirm}
-                  askFor={setPrompt}
                 />
               ))}
         </div>
@@ -224,20 +221,19 @@ export function AdminPanel({ session }: { session: Session }) {
         </div>
       )}
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
-      <PromptDialog request={prompt} onClose={() => setPrompt(null)} />
     </section>
   );
 }
 
 function MemberRow({
-  member, session, editable, act, ask, askFor,
+  member, session, editable, canResetPassword, act, ask,
 }: {
   member: Member;
   session: Session;
   editable: boolean;
   act: (work: () => Promise<unknown>, message: string) => Promise<void>;
   ask: (request: ConfirmRequest) => void;
-  askFor: (request: PromptRequest) => void;
+  canResetPassword: boolean;
 }) {
   const changeRole = (role: Role) =>
     ask({
@@ -278,16 +274,11 @@ function MemberRow({
   };
 
   const resetPassword = () =>
-    askFor({
-      title: "Reset password",
-      body: <p>Set a new password for <strong>{member.displayName}</strong> and pass it on to them. They can change it themselves under Profile.</p>,
-      label: "New password",
-      hint: "At least 4 characters.",
-      type: "password",
-      minLength: 4,
-      confirmLabel: "Reset password",
-      onSubmit: (password) =>
-        act(() => resetMemberPassword(session.token, member.id, password), `${member.displayName}'s password was reset.`),
+    ask({
+      title: "Reset to temporary password?",
+      body: <p><strong>{member.displayName}</strong>'s password will become <strong>gurukul</strong>. Share it with them securely; they can immediately choose their own password in Account.</p>,
+      confirmLabel: "Reset to gurukul",
+      onConfirm: () => act(() => resetMemberPassword(session.token, member.id), `${member.displayName}'s password was reset to gurukul.`),
     });
 
   /**
@@ -360,6 +351,9 @@ function MemberRow({
           </button>
           <button type="button" className="remove" onClick={removeAccount}>Delete</button>
         </div>
+      )}
+      {!canEdit && canResetPassword && !isProtected && (
+        <div className="admin-actions"><button type="button" onClick={resetPassword}>Reset password</button></div>
       )}
     </article>
   );

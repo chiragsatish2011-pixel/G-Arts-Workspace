@@ -4,9 +4,10 @@ import { requireTeam, requireTeamRole } from "../auth.js";
 import { prisma } from "../lib/prisma.js";
 import { CATEGORIES, isCategory } from "../services/events.js";
 import { CalendarError, fetchSchoolCalendar } from "../services/gurukul-calendar.js";
+import { taskTransitionProblem } from "../services/task-workflow.js";
+import { httpsUrl } from "../services/verified-links.js";
 
 const coverage = z.array(z.string().trim().min(2).max(60)).max(20);
-const httpsUrl = z.string().url().refine((value) => /^https:\/\//i.test(value), "Use a secure https link");
 
 const eventBody = z.object({
   name: z.string().min(2, "Give the event a name").max(140, "That name is too long"),
@@ -241,11 +242,8 @@ export const eventRoutes: FastifyPluginAsync = async (app) => {
     const admin = ["SUPER_ADMIN", "ADMIN"].includes(request.user.role);
     const next = body.data.status;
     const kind = next === "not_done" ? null : body.data.completionKind === undefined ? (task.completionKind ?? "finished") : body.data.completionKind;
-    if (next === "approved" && (!admin || task.status !== "submitted")) return reply.code(403).send({ error: "An administrator can approve a submitted item after review" });
-    if (task.completionKind === "not_required" && !admin) return reply.code(403).send({ error: "Only an administrator can change a not-required decision" });
-    if (kind === "not_required" && !admin) return reply.code(403).send({ error: "Only an administrator can mark work not required" });
-    if (next === "submitted" && task.status === "approved" && !admin) return reply.code(403).send({ error: "Only an administrator can reopen an approved item" });
-    if (next === "not_done" && task.status === "approved" && !admin) return reply.code(403).send({ error: "Only an administrator can reopen an approved item" });
+    const transitionError = taskTransitionProblem({ currentStatus: task.status as "not_done" | "submitted" | "approved", currentKind: task.completionKind as "finished" | "not_required" | null, nextStatus: next, nextKind: kind as "finished" | "not_required" | null, isAdmin: admin });
+    if (transitionError) return reply.code(403).send({ error: transitionError });
     const now = new Date();
     return prisma.task.update({
       where: { id: task.id },

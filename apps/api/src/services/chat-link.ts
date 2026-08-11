@@ -38,6 +38,35 @@ export async function syncMembersToChat(members: ChatMember[]) {
   return (await response.json()) as { mirrored: number };
 }
 
+/** A visible, read-only status record for every chat member. */
+export async function publishChatNotice(message: string) {
+  const url = `${env.CHAT_API_URL.replace(/\/$/, "")}/api/integration/notices`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { authorization: `Bearer ${env.CHAT_SERVICE_TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify({ message }), signal: AbortSignal.timeout(8000),
+    });
+  } catch { throw new ChatLinkError("The chat service could not publish the Workspace status notice."); }
+  if (!response.ok) throw new ChatLinkError(`Chat could not publish the Workspace status notice (${response.status}).`);
+  return (await response.json()) as { channelId: string; messageId: string };
+}
+
+/** Keeps a suspension or restoration consistent across both services. */
+export async function setChatMemberAccess(workspaceUserId: string, disabled: boolean) {
+  const url = `${env.CHAT_API_URL.replace(/\/$/, "")}/api/integration/members/${encodeURIComponent(workspaceUserId)}`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${env.CHAT_SERVICE_TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify({ disabled }), signal: AbortSignal.timeout(8000),
+    });
+  } catch { throw new ChatLinkError("The chat service could not update this member's access."); }
+  if (!response.ok) throw new ChatLinkError(`Chat could not update this member's access (${response.status}).`);
+}
+
 /**
  * Removes a member from chat.
  *
@@ -51,14 +80,15 @@ export async function syncMembersToChat(members: ChatMember[]) {
  *   every message, reaction and attachment that member ever posted. When
  *   false the person is removed but their posts in shared channels remain.
  */
-export async function removeMemberFromChat(workspaceUserId: string, erase: boolean): Promise<Removal> {
+export async function removeMemberFromChat(workspaceUserId: string, erase: boolean, notice?: string): Promise<Removal> {
   const url = `${env.CHAT_API_URL.replace(/\/$/, "")}/api/integration/members/${encodeURIComponent(workspaceUserId)}?erase=${erase}`;
 
   let response: Response;
   try {
     response = await fetch(url, {
       method: "DELETE",
-      headers: { authorization: `Bearer ${env.CHAT_SERVICE_TOKEN}` },
+      headers: { authorization: `Bearer ${env.CHAT_SERVICE_TOKEN}`, "content-type": "application/json" },
+      body: notice ? JSON.stringify({ message: notice }) : undefined,
       // Long enough for a slow local start, short enough that an administrator
       // is not left watching a spinner.
       signal: AbortSignal.timeout(8000),

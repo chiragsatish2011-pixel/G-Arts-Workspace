@@ -27,6 +27,8 @@ enum Availability {
 enum Team {
   G_ARTS
   TRANSLATION
+  /** Chat-only notices and discussion. No Workspace work surfaces. */
+  G_NEWS
 }
 
 enum LibraryKind {
@@ -53,8 +55,10 @@ model User {
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
-  translationSchedule TranslationScheduleItem[]
+  onboardingDismissedAt DateTime?
+  onboardingCompletedAt DateTime?
   translationWeeks TranslationArticleWeek[]
+  gNewsTodos     GNewsTodo[]
 
   @@index([username])
   @@index([team])
@@ -73,23 +77,19 @@ model LibraryItem {
   @@index([kind])
 }
 
-/** Personal Translation-team schedule entries. The owner edits their own
- * entries; administrators can review them without taking over the schedule. */
-model TranslationScheduleItem {
-  id        String   @id @default(cuid())
-  ownerId   String
-  title     String
-  startsAt  DateTime
-  status    String   @default("not_done")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  doneAt    DateTime?
+/** A personal, deliberately simple checklist for a G-News member. It is not
+ * connected to G-Arts event approvals or Translation's weekly schedule. */
+model GNewsTodo {
+  id          String    @id @default(cuid())
+  ownerId     String
+  title       String
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
-  @@index([ownerId])
-  @@index([startsAt])
-  @@index([status])
+  @@index([ownerId, completedAt])
 }
 
 /** A translator-owned weekly article plan, based exactly on the supplied
@@ -156,9 +156,9 @@ model AuditLog {
 // ---------------------------------------------------------------------------
 // Events — the object the rest of G Arts hangs from.
 //
-// The team's work is event-driven: a function happens, it is covered,
-// projects are planned, and the completed work remains connected to the event
-// it came from. Everything later in the roadmap points back here.
+// The team's work is event-driven: a function happens, it is covered, its
+// direct work-items are completed, and the record remains connected to the
+// event it came from.
 // ---------------------------------------------------------------------------
 
 model Event {
@@ -258,42 +258,12 @@ model EventDelivery {
 }
 
 // ---------------------------------------------------------------------------
-// Projects and tasks.
-//
-// Projects may exist beside an event's direct work-items. The system never
-// generates a checklist or labels a project as main on its own.
+// Direct event work-items. Every item is explicitly named by G-Arts; the
+// system never creates a project layer or guesses a checklist.
 // ---------------------------------------------------------------------------
-
-model Project {
-  id          String  @id @default(cuid())
-  eventId     String?
-  name        String
-  /**
-   * photo | video | shorts | graphics | website | live | archive
-   */
-  type        String  @default("photo")
-  description String?
-
-  /**
-   * planned → capture → ready_for_edit → editing → review → approved → published → archived
-   */
-  stage String @default("planned")
-
-  dueAt       DateTime?
-  createdById String
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  archivedAt  DateTime?
-
-  tasks       Task[]
-
-  @@index([eventId])
-  @@index([stage])
-}
 
 model Task {
   id         String    @id @default(cuid())
-  projectId  String?
   eventId    String?
   title      String
   /**
@@ -324,10 +294,8 @@ model Task {
   /** The earlier occurrence this direct work-item was copied from, if any. */
   copiedFromEventId String?
 
-  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
   event   Event?   @relation(fields: [eventId], references: [id], onDelete: Cascade)
 
-  @@index([projectId])
   @@index([eventId])
   @@index([assigneeId])
   @@index([status])

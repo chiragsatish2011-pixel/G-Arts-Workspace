@@ -2,7 +2,7 @@
  * Event categories.
  *
  * Categories are labels selected by a person. They do not imply work, coverage,
- * projects, tasks, or a category for a calendar entry.
+ * work-items or a category for a calendar entry.
  */
 
 export interface Category {

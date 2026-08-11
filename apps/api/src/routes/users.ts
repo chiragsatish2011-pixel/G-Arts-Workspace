@@ -5,11 +5,14 @@ import { z } from "zod";
 import { authenticate, requireMinimumRole } from "../auth.js";
 import { prisma } from "../lib/prisma.js";
 import { canManageRole } from "../permissions.js";
-import { ChatLinkError, removeMemberFromChat, syncMembersToChat } from "../services/chat-link.js";
+import { ChatLinkError, publishChatNotice, removeMemberFromChat, setChatMemberAccess, syncMembersToChat } from "../services/chat-link.js";
 import { deleteAvatarFile } from "./avatars.js";
 
 const roles = ["SUPER_ADMIN", "ADMIN", "TEAM_LEAD", "MEMBER", "TRAINEE", "GUEST"] as const;
-const teams = ["G_ARTS", "TRANSLATION"] as const;
+const teams = ["G_ARTS", "TRANSLATION", "G_NEWS"] as const;
+const chatOnlyRoles = ["MEMBER", "TRAINEE", "GUEST"] as const;
+/** Members receive this once, then choose their own private password in Account. */
+const DEFAULT_MEMBER_PASSWORD = "gurukul";
 
 const username = z
   .string()
@@ -33,14 +36,18 @@ const newUser = z.object({
   username,
   displayName: z.string().min(2, "Enter the member's name").max(100, "That name is too long"),
   title: z.string().max(80, "Team title is too long").optional(),
-  password,
   role: z.enum(roles).default("MEMBER"),
   team: z.enum(teams).default("G_ARTS"),
+}).superRefine((value, context) => {
+  if (value.team === "G_NEWS" && !chatOnlyRoles.includes(value.role as typeof chatOnlyRoles[number])) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["role"], message: "G-News is chat-only; choose Member, Trainee or Guest" });
+  }
 });
 
 const publicUser = {
   id: true, username: true, displayName: true, avatarUrl: true, accentColor: true,
   title: true, role: true, team: true, skills: true, availability: true, createdAt: true, deletedAt: true,
+  onboardingDismissedAt: true, onboardingCompletedAt: true,
 } as const;
 
 /**
@@ -51,6 +58,9 @@ const publicUser = {
 function firstProblem(error: z.ZodError, fallback: string) {
   return error.issues[0]?.message ?? fallback;
 }
+
+const readableRole = (role: string) => role.replaceAll("_", " ").toLowerCase();
+const readableTeam = (team: Team) => team === "G_ARTS" ? "G-Arts" : team === "TRANSLATION" ? "Translation" : "G-News";
 
 export const userRoutes: FastifyPluginAsync = async (app) => {
   app.get("/", { preHandler: requireMinimumRole("ADMIN") }, async () => {
@@ -69,18 +79,19 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
     const taken = await prisma.user.findUnique({ where: { username: body.data.username } });
     if (taken) return reply.code(409).send({ error: `The username @${body.data.username} is already taken` });
 
-    const { password: chosen, ...member } = body.data;
     const user = await prisma.user.create({
-      data: { ...member, passwordHash: await bcrypt.hash(chosen, 12) },
+      data: { ...body.data, passwordHash: await bcrypt.hash(DEFAULT_MEMBER_PASSWORD, 12) },
       select: publicUser,
     });
     try {
       await syncMembersToChat([user]);
+      await publishChatNotice(`${user.displayName} joined ${readableTeam(user.team)} as ${readableRole(user.role)}.`);
     } catch (cause) {
       // A new Workspace account that cannot be found in Chat is misleading.
       // Delete this just-created, unused row and make the administrator retry
       // once the linked service is healthy.
       await prisma.user.delete({ where: { id: user.id } });
+      await removeMemberFromChat(user.id, false).catch(() => undefined);
       if (cause instanceof ChatLinkError) return reply.code(502).send({ error: `${cause.message} The account was not created.` });
       throw cause;
     }
@@ -106,7 +117,17 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
     const target = await prisma.user.findFirst({ where: { id: params.data.id, deletedAt: null } });
     if (!target) return reply.code(404).send({ error: "Member not found" });
     if (target.role === "SUPER_ADMIN") return reply.code(403).send({ error: "Super-admin workspace type cannot be changed here" });
+    if (body.data.team === "G_NEWS" && !chatOnlyRoles.includes(target.role as typeof chatOnlyRoles[number])) return reply.code(400).send({ error: "G-News is chat-only. Change this account to Member, Trainee or Guest first." });
     const user = await prisma.user.update({ where: { id: target.id }, data: { team: body.data.team as Team }, select: publicUser });
+    try {
+      await syncMembersToChat([user]);
+      await publishChatNotice(`${user.displayName} is now part of ${readableTeam(user.team)}.`);
+    } catch (cause) {
+      await prisma.user.update({ where: { id: target.id }, data: { team: target.team } });
+      await syncMembersToChat([{ ...target, role: target.role, title: target.title, accentColor: target.accentColor }]).catch(() => undefined);
+      if (cause instanceof ChatLinkError) return reply.code(502).send({ error: `${cause.message} The workspace change was not saved.` });
+      throw cause;
+    }
     await prisma.auditLog.create({
       data: { actorId: request.user.sub, action: "team_changed", targetType: "User", targetId: user.id, metadata: { previousTeam: target.team, nextTeam: user.team, displayName: user.displayName } },
     });
@@ -122,7 +143,17 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
     if (!canManageRole(request.user.role, target.role) || !canManageRole(request.user.role, body.data.role as Role)) {
       return reply.code(403).send({ error: "Super-admin accounts cannot be changed here" });
     }
+    if (target.team === "G_NEWS" && !chatOnlyRoles.includes(body.data.role as typeof chatOnlyRoles[number])) return reply.code(400).send({ error: "G-News is chat-only; choose Member, Trainee or Guest" });
     const user = await prisma.user.update({ where: { id: target.id }, data: { role: body.data.role }, select: publicUser });
+    try {
+      await syncMembersToChat([user]);
+      await publishChatNotice(`${user.displayName} is now ${readableRole(user.role)}.`);
+    } catch (cause) {
+      await prisma.user.update({ where: { id: target.id }, data: { role: target.role } });
+      await syncMembersToChat([{ ...target, role: target.role, title: target.title, accentColor: target.accentColor }]).catch(() => undefined);
+      if (cause instanceof ChatLinkError) return reply.code(502).send({ error: `${cause.message} The role change was not saved.` });
+      throw cause;
+    }
     await prisma.auditLog.create({
       data: { actorId: request.user.sub, action: "role_changed", targetType: "User", targetId: user.id, metadata: { previousRole: target.role, nextRole: user.role } },
     });
@@ -142,6 +173,18 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
       data: { deletedAt: body.data.disabled ? new Date() : null },
       select: publicUser,
     });
+    try {
+      await setChatMemberAccess(user.id, body.data.disabled);
+    } catch (cause) {
+      await prisma.user.update({ where: { id: target.id }, data: { deletedAt: target.deletedAt } });
+      if (cause instanceof ChatLinkError) return reply.code(502).send({ error: `${cause.message} The access change was not saved.` });
+      throw cause;
+    }
+    // Access must never depend on a cosmetic notice. The Chat account is
+    // already disabled/restored above; a temporary notice failure is logged.
+    try {
+      await publishChatNotice(body.data.disabled ? `${user.displayName} has been suspended from the Workspace.` : `${user.displayName}'s Workspace access was restored.`);
+    } catch (cause) { app.log.warn({ cause, userId: user.id }, "Chat access changed but status notice is pending"); }
     await prisma.auditLog.create({
       data: { actorId: request.user.sub, action: body.data.disabled ? "member_access_suspended" : "member_access_restored", targetType: "User", targetId: user.id },
     });
@@ -178,7 +221,7 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
 
     let chat: Awaited<ReturnType<typeof removeMemberFromChat>>;
     try {
-      chat = await removeMemberFromChat(target.id, body.data.erase);
+      chat = await removeMemberFromChat(target.id, body.data.erase, `${target.displayName} has been removed from the Workspace.`);
     } catch (cause) {
       if (cause instanceof ChatLinkError) return reply.code(502).send({ error: cause.message });
       throw cause;
@@ -231,7 +274,7 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
     const user = await prisma.user.update({
       where: { id: request.user.sub },
       data: body.data,
-      select: { id: true, username: true, displayName: true, avatarUrl: true, title: true, bio: true, accentColor: true, role: true, team: true },
+      select: { id: true, username: true, displayName: true, avatarUrl: true, title: true, bio: true, accentColor: true, role: true, team: true, onboardingDismissedAt: true, onboardingCompletedAt: true },
     });
     // Chat holds a projection of workspace identities for member lists and
     // message attribution. Refresh it at the authoritative write, rather
@@ -257,15 +300,31 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
     return { success: true };
   });
 
-  app.post("/:id/password", { preHandler: requireMinimumRole("SUPER_ADMIN") }, async (request, reply) => {
+  app.patch("/me/onboarding", { preHandler: authenticate }, async (request, reply) => {
+    const body = z.object({ status: z.enum(["skipped", "completed"]) }).safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: "Choose whether the guide was skipped or completed" });
+    const now = new Date();
+    const user = await prisma.user.update({
+      where: { id: request.user.sub },
+      data: body.data.status === "completed" ? { onboardingCompletedAt: now } : { onboardingDismissedAt: now },
+      select: { id: true, username: true, displayName: true, avatarUrl: true, title: true, bio: true, accentColor: true, role: true, team: true, onboardingDismissedAt: true, onboardingCompletedAt: true },
+    });
+    const token = await reply.jwtSign({ sub: user.id, username: user.username, displayName: user.displayName, role: user.role });
+    return { token, user };
+  });
+
+  app.post("/:id/password", { preHandler: requireMinimumRole("ADMIN") }, async (request, reply) => {
     const params = z.object({ id: z.string().cuid() }).safeParse(request.params);
-    const body = z.object({ newPassword: password, confirm: z.literal(true) }).safeParse(request.body);
+    const body = z.object({ confirm: z.literal(true) }).safeParse(request.body);
     if (!params.success) return reply.code(400).send({ error: "Member not found" });
-    if (!body.success) return reply.code(400).send({ error: firstProblem(body.error, "Enter a new password") });
+    if (!body.success) return reply.code(400).send({ error: "Password reset must be confirmed" });
     const target = await prisma.user.findUnique({ where: { id: params.data.id } });
     if (!target) return reply.code(404).send({ error: "Member not found" });
-    if (!canManageRole(request.user.role, target.role)) return reply.code(403).send({ error: "Super-admin accounts cannot be changed here" });
-    await prisma.user.update({ where: { id: target.id }, data: { passwordHash: await bcrypt.hash(body.data.newPassword, 12) } });
+    const canReset = request.user.role === "SUPER_ADMIN"
+      ? target.role !== "SUPER_ADMIN"
+      : ["TEAM_LEAD", "MEMBER", "TRAINEE", "GUEST"].includes(target.role);
+    if (!canReset) return reply.code(403).send({ error: "You cannot reset this account's password" });
+    await prisma.user.update({ where: { id: target.id }, data: { passwordHash: await bcrypt.hash(DEFAULT_MEMBER_PASSWORD, 12) } });
     await prisma.auditLog.create({
       data: { actorId: request.user.sub, action: "member_password_reset", targetType: "User", targetId: target.id },
     });

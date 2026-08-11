@@ -6,7 +6,9 @@ import { config } from '../config.js';
 import { logger } from '../lib/logger.js';
 import { isServiceCall, mapWorkspaceRole } from '../services/workspace-identity.js';
 import { conversationService } from '../services/conversation.js';
-import { subscribeUserToChannel } from '../socket/broadcaster.js';
+import { messageService } from '../services/message.js';
+import { broadcastToChannel, subscribeUserToChannel } from '../socket/broadcaster.js';
+import { SocketEvents } from '@g-arts/chat-shared';
 
 /**
  * Service-to-service surface for the G Arts Workspace.
@@ -48,6 +50,79 @@ const memberSchema = z.object({
     .max(200)
 });
 
+const noticeSchema = z.object({ message: z.string().trim().min(3).max(280) });
+
+/** These are part of the workspace itself, not disposable project rooms.
+ * Keep them public and make every active Workspace account a member so their
+ * messages, unread state and socket delivery are consistent from day one. */
+async function ensureSharedChannels() {
+  const owner = await prisma.user.findFirst({
+    where: { disabledAt: null }, orderBy: [{ role: 'asc' }, { createdAt: 'asc' }], select: { id: true }
+  });
+  if (!owner) throw new Error('No active Chat account is available for shared channels');
+  const definitions = [
+    { slug: 'general', name: 'General', description: 'The shared conversation for everyone in the Workspace', type: 'text' },
+    { slug: 'announcements', name: 'Announcements', description: 'Important updates from Workspace administrators', type: 'announcement' }
+  ];
+  const members = await prisma.user.findMany({ where: { disabledAt: null }, select: { id: true } });
+  const channels = [];
+  for (const definition of definitions) {
+    const channel = await prisma.channel.upsert({
+      where: { slug: definition.slug },
+      create: { kind: 'channel', ...definition, isPrivate: false, isArchived: false, createdById: owner.id },
+      update: { name: definition.name, description: definition.description, type: definition.type, isPrivate: false, isArchived: false },
+      select: { id: true, name: true, createdById: true }
+    });
+    for (const member of members) {
+      await prisma.channelMember.upsert({
+        where: { channelId_userId: { channelId: channel.id, userId: member.id } },
+        create: { channelId: channel.id, userId: member.id, role: member.id === channel.createdById ? 'owner' : 'member' }, update: {}
+      });
+      await subscribeUserToChannel(member.id, channel.id);
+    }
+    channels.push(channel);
+  }
+  return channels;
+}
+
+/** A small, permanent public channel for changes that affect the whole
+ * Workspace. It is created only when the first real status notice is needed. */
+async function workspaceUpdatesChannel() {
+  let channel = await prisma.channel.findUnique({ where: { slug: 'workspace-updates' }, select: { id: true, createdById: true } });
+  if (!channel) {
+    const owner = await prisma.user.findFirst({
+      where: { disabledAt: null },
+      orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
+      select: { id: true }
+    });
+    if (!owner) throw new Error('No active Chat account is available for Workspace updates');
+    channel = await prisma.channel.create({
+      data: { kind: 'channel', name: 'Workspace updates', slug: 'workspace-updates', description: 'Account and workspace changes', type: 'announcement', isPrivate: false, createdById: owner.id },
+      select: { id: true, createdById: true }
+    });
+  }
+  const members = await prisma.user.findMany({ where: { disabledAt: null }, select: { id: true } });
+  for (const member of members) {
+    await prisma.channelMember.upsert({
+      where: { channelId_userId: { channelId: channel.id, userId: member.id } },
+      create: { channelId: channel.id, userId: member.id, role: member.id === channel.createdById ? 'owner' : 'member' },
+      update: {}
+    });
+    await subscribeUserToChannel(member.id, channel.id);
+  }
+  return channel;
+}
+
+async function publishWorkspaceNotice(content: string) {
+  const channel = await workspaceUpdatesChannel();
+  const author = await prisma.user.findFirst({ where: { id: channel.createdById, disabledAt: null }, select: { id: true } })
+    ?? await prisma.user.findFirst({ where: { disabledAt: null }, orderBy: [{ role: 'asc' }, { createdAt: 'asc' }], select: { id: true } });
+  if (!author) throw new Error('No active Chat account is available for Workspace updates');
+  const created = await messageService.create({ channelId: channel.id, userId: author.id, content, type: 'system' });
+  broadcastToChannel(channel.id, SocketEvents.MESSAGE_NEW, { channelId: channel.id, message: created.message });
+  return { channelId: channel.id, messageId: created.message.id };
+}
+
 export async function integrationRoutes(fastify: FastifyInstance) {
   // Refuse the whole surface unless the Workspace link is configured, so a
   // standalone deployment does not expose it at all.
@@ -74,7 +149,36 @@ export async function integrationRoutes(fastify: FastifyInstance) {
     for (const member of parsed.data.members) {
       users.push(await mirrorWorkspaceMember(member));
     }
-    return { mirrored: users.length, users };
+    const sharedChannels = await ensureSharedChannels();
+    return { mirrored: users.length, users, sharedChannels: sharedChannels.map(({ id, name }) => ({ id, name })) };
+  });
+
+  /** Idempotent recovery endpoint for the two permanent team-wide channels. */
+  fastify.post('/shared-channels', async () => {
+    const channels = await ensureSharedChannels();
+    return { channels: channels.map(({ id, name }) => ({ id, name })) };
+  });
+
+  /** Posts a permanent, visible Workspace status note to every active chat
+   * member. The Workspace is the only caller that can create these messages. */
+  fastify.post('/notices', async (request, reply) => {
+    const parsed = noticeSchema.safeParse(request.body);
+    if (!parsed.success) return reply.status(400).send({ error: 'Invalid Workspace notice' });
+    return publishWorkspaceNotice(parsed.data.message);
+  });
+
+  /** Suspension is an access decision in the Workspace, so Chat mirrors it
+   * immediately and revokes its own sessions. Restoration makes the account
+   * visible again without inventing a new identity. */
+  fastify.patch('/members/:workspaceUserId', async (request, reply) => {
+    const params = z.object({ workspaceUserId: z.string().min(1).max(64) }).safeParse(request.params);
+    const body = z.object({ disabled: z.boolean() }).safeParse(request.body);
+    if (!params.success || !body.success) return reply.status(400).send({ error: 'Invalid member access update' });
+    const member = await prisma.user.findUnique({ where: { workspaceUserId: params.data.workspaceUserId }, select: { id: true } });
+    if (!member) return reply.status(404).send({ error: 'Member not found in Chat' });
+    if (body.data.disabled) await prisma.session.deleteMany({ where: { userId: member.id } });
+    await prisma.user.update({ where: { id: member.id }, data: { disabledAt: body.data.disabled ? new Date() : null, status: body.data.disabled ? 'offline' : 'online' } });
+    return { updated: true, disabled: body.data.disabled };
   });
 
   /**
@@ -200,6 +304,8 @@ export async function integrationRoutes(fastify: FastifyInstance) {
   fastify.delete('/members/:workspaceUserId', async (request, reply) => {
     const { workspaceUserId } = request.params as { workspaceUserId: string };
     const erase = (request.query as { erase?: string }).erase === 'true';
+    const notice = z.object({ message: z.string().trim().min(3).max(280).optional() }).safeParse(request.body);
+    if (!notice.success) return reply.status(400).send({ error: 'Invalid Workspace notice' });
 
     const member = await prisma.user.findUnique({
       where: { workspaceUserId },
@@ -208,6 +314,10 @@ export async function integrationRoutes(fastify: FastifyInstance) {
     // Already gone is a success: the Workspace asked for this member to be
     // absent, and they are.
     if (!member) return { removed: false, erased: false, reason: 'not present in chat' };
+
+    // This happens before removal, while the account is still part of the
+    // shared space. If it cannot be published, the deletion is aborted.
+    if (notice.data.message) await publishWorkspaceNotice(notice.data.message);
 
     // Private chats go either way. They belong to exactly two people, and one
     // of them no longer has an account.

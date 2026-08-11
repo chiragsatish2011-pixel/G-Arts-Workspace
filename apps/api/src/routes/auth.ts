@@ -34,6 +34,7 @@ const credentials = z.object({
 const sessionUser = {
   id: true, username: true, displayName: true, avatarUrl: true, accentColor: true,
   title: true, role: true, team: true,
+  onboardingDismissedAt: true, onboardingCompletedAt: true,
 } as const;
 
 /** Accounts created before chat was connected must be mirrored too. This is

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { avatarSrc, forgetSession, listEvents, listMembers, login, rememberSession, resumeSession, type GEvent, type Session } from "./api";
+import { avatarSrc, forgetSession, listEvents, listMembers, login, rememberSession, resumeSession, updateOnboarding, type GEvent, type Session } from "./api";
 import { AdminPanel } from "./AdminPanel";
 import { ChatSpace } from "./ChatSpace";
 import { EventsPanel } from "./EventsPanel";
@@ -9,6 +9,9 @@ import { ConfirmDialog, type ConfirmRequest } from "./Modal";
 import { ProfilePanel } from "./ProfilePanel";
 import { LibraryPanel } from "./LibraryPanel";
 import { TranslationArticleTracker } from "./TranslationArticleTracker";
+import { GNewsTodoPanel } from "./GNewsTodoPanel";
+import { TutorialPanel } from "./TutorialPanel";
+import { GuideHub } from "./GuideHub";
 
 /** A single short word is a first name; anything else reads better in full. */
 function firstName(displayName: string) {
@@ -80,7 +83,7 @@ function Login({ onSession }: { onSession: (session: Session) => void }) {
         </div>
         <span className="eyebrow">SHREE SWAMINARAYAN GURUKUL BANGALORE</span>
         <h1>G-Arts<br />Workspace</h1>
-        <p>The private production home for events, projects, and the work that connects them.</p>
+        <p>The private production home for events and the work that connects them.</p>
       </section>
 
       <section className="login-panel">
@@ -127,9 +130,9 @@ function AccountAvatar({ session }: { session: Session }) {
   return <span className="avatar" style={!face && session.user.accentColor ? { background: session.user.accentColor } : undefined}>{face ? <img src={face} alt="" /> : initials(session.user.displayName)}</span>;
 }
 
-type View = "overview" | "events" | "logbook" | "chat" | "admin" | "profile" | "library" | "translation";
+type View = "overview" | "events" | "logbook" | "chat" | "admin" | "profile" | "library" | "translation" | "g-news-todos" | "tutorial";
 
-const VIEWS: View[] = ["overview", "events", "logbook", "chat", "admin", "profile", "library", "translation"];
+const VIEWS: View[] = ["overview", "events", "logbook", "chat", "admin", "profile", "library", "translation", "g-news-todos", "tutorial"];
 
 /** Keeps the open space in the address bar so a refresh returns to it. */
 function viewFromHash(): View {
@@ -142,6 +145,8 @@ export function App() {
   const [resuming, setResuming] = useState(true);
   const [view, setViewState] = useState<View>(viewFromHash);
   const [logoutConfirm, setLogoutConfirm] = useState<ConfirmRequest | null>(null);
+  const [showFirstGuide, setShowFirstGuide] = useState(false);
+  const [tourRunning, setTourRunning] = useState(false);
 
   const setView = (next: View) => {
     setViewState(next);
@@ -159,7 +164,15 @@ export function App() {
 
   useEffect(() => {
     if (session?.user.team === "TRANSLATION" && view === "overview") setView("translation");
-  }, [session?.user.team]);
+    if (session?.user.team === "G_NEWS" && view !== "chat" && view !== "profile" && view !== "library" && view !== "g-news-todos") setView("chat");
+  }, [session?.user.team, view]);
+
+  useEffect(() => {
+    if (session && !session.user.onboardingDismissedAt && !session.user.onboardingCompletedAt) {
+      setShowFirstGuide(true);
+      setView("tutorial");
+    }
+  }, [session]);
 
   useEffect(() => {
     const onHash = () => setViewState(viewFromHash());
@@ -205,6 +218,7 @@ export function App() {
 
   const canAdminister = ["SUPER_ADMIN", "ADMIN"].includes(session.user.role);
   const translationWorkspace = session.user.team === "TRANSLATION";
+  const chatOnlyWorkspace = session.user.team === "G_NEWS";
   const todoItems = upcomingEvents.flatMap((event) => event.tasks.filter((task) => task.status === "not_done").map((task) => ({ event, task })));
 
   return (
@@ -236,19 +250,21 @@ export function App() {
 
         <div className="masthead-bar">
           <nav>
-            {!translationWorkspace && <button className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}>Home</button>}
-            {!translationWorkspace && <button className={view === "events" ? "active" : ""} onClick={() => setView("events")}>Event checklist</button>}
-            {!translationWorkspace && <button className={view === "logbook" ? "active" : ""} onClick={() => setView("logbook")}>History</button>}
-            {(translationWorkspace || canAdminister) && <button className={view === "translation" ? "active" : ""} onClick={() => setView("translation")}>{translationWorkspace ? "My schedule" : "Translation"}</button>}
-            <button className={view === "library" ? "active" : ""} onClick={() => setView("library")}>Library</button>
-            <button className={view === "chat" ? "active" : ""} onClick={() => setView("chat")}>
+            {!translationWorkspace && !chatOnlyWorkspace && <button data-tour="home" className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}>Home</button>}
+            {!translationWorkspace && !chatOnlyWorkspace && <button data-tour="events" className={view === "events" ? "active" : ""} onClick={() => setView("events")}>Event checklist</button>}
+            {!translationWorkspace && !chatOnlyWorkspace && <button data-tour="history" className={view === "logbook" ? "active" : ""} onClick={() => setView("logbook")}>History</button>}
+            {(translationWorkspace || canAdminister) && <button data-tour="translation" className={view === "translation" ? "active" : ""} onClick={() => setView("translation")}>{translationWorkspace ? "My schedule" : "Translation"}</button>}
+            <button data-tour="library" className={view === "library" ? "active" : ""} onClick={() => setView("library")}>Library</button>
+            {chatOnlyWorkspace && <button data-tour="g-news-todos" className={view === "g-news-todos" ? "active" : ""} onClick={() => setView("g-news-todos")}>My to-dos</button>}
+            <button data-tour="guide" className={view === "tutorial" ? "active" : ""} onClick={() => setView("tutorial")}>Guide</button>
+            <button data-tour="chat" className={view === "chat" ? "active" : ""} onClick={() => setView("chat")}>
               Chat
               {chatUnread > 0 && <span className="nav-badge">{chatUnread > 99 ? "99+" : chatUnread}</span>}
             </button>
-            {canAdminister && (
-              <button className={view === "admin" ? "active" : ""} onClick={() => setView("admin")}>Members</button>
+            {canAdminister && !chatOnlyWorkspace && (
+              <button data-tour="members" className={view === "admin" ? "active" : ""} onClick={() => setView("admin")}>Members</button>
             )}
-            <button className={view === "profile" ? "active" : ""} onClick={() => setView("profile")}>Account</button>
+            <button data-tour="account" className={view === "profile" ? "active" : ""} onClick={() => setView("profile")}>Account</button>
           </nav>
 
 
@@ -270,6 +286,10 @@ export function App() {
             <AdminPanel session={session} />
           ) : view === "library" ? (
             <LibraryPanel session={session} />
+          ) : view === "g-news-todos" ? (
+            <GNewsTodoPanel session={session} />
+          ) : view === "tutorial" ? (
+            <GuideHub session={session} firstVisit={showFirstGuide} onStart={() => setTourRunning(true)} onSkip={() => { void updateOnboarding(session.token, "skipped").then((next) => { rememberSession(next); setSession(next); }).catch(() => undefined); setShowFirstGuide(false); setView("overview"); }} />
           ) : view === "translation" ? (
             <TranslationArticleTracker session={session} />
           ) : (
@@ -324,6 +344,7 @@ export function App() {
           )}
         </section>
       </div>
+      {tourRunning && <TutorialPanel session={session} onFinished={(next) => { rememberSession(next); setSession(next); setTourRunning(false); setShowFirstGuide(false); setView("overview"); }} />}
       <ConfirmDialog request={logoutConfirm} onClose={() => setLogoutConfirm(null)} />
     </div>
   );

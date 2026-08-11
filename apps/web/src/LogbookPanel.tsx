@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { listEvents, listLogbook, type GEvent, type LogbookEntry, type Session } from "./api";
 
-const icon: Record<LogbookEntry["kind"], string> = { event: "◆", project: "●", task: "✓" };
-const kindLabel: Record<LogbookEntry["kind"], string> = { event: "Event", project: "Project", task: "Done" };
+const icon: Record<LogbookEntry["kind"], string> = { event: "◆", task: "✓" };
+const kindLabel: Record<LogbookEntry["kind"], string> = { event: "Event", task: "Done" };
 const time = (date: string) => new Date(date).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
 /** A human-readable memory of G-Arts production work, built only from actual

@@ -18,4 +18,3 @@ packages/chat-db/generated/
 !.env.example
 !.env.production.example
 .vercel
-.env*

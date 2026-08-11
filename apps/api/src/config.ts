@@ -48,7 +48,30 @@ if (parsed.NODE_ENV === "production") {
     ["CHAT_SERVICE_TOKEN", parsed.CHAT_SERVICE_TOKEN],
   ].filter(([, value]) => unsafeSecret(value)).map(([key]) => key);
   if (missing.length > 0) throw new Error(`Refusing to start in production without non-default ${missing.join(", ")}`);
-  if (!/^postgres(?:ql)?:\/\//i.test(parsed.DATABASE_URL)) throw new Error("Refusing to start in production without a PostgreSQL DATABASE_URL");
+
+  /**
+   * The schema declares `provider = "sqlite"`, so a PostgreSQL URL cannot work
+   * without changing the schema and migrating the data — Prisma rejects it
+   * outright with "the URL must start with the protocol `file:`". Demanding
+   * Postgres here made production impossible to start rather than safer.
+   *
+   * What actually matters is that the database survives a restart. A relative
+   * path is the dangerous case: on a host with an ephemeral filesystem it
+   * resolves somewhere temporary, appears to work, and silently loses every
+   * account the first time the process moves.
+   */
+  const sqlite = parsed.DATABASE_URL.match(/^file:(.*)$/i);
+  if (!sqlite) {
+    throw new Error(
+      "Refusing to start in production: DATABASE_URL must be a file: URL, because the Prisma schema uses SQLite.",
+    );
+  }
+  if (!path.isAbsolute(sqlite[1])) {
+    throw new Error(
+      "Refusing to start in production with a relative DATABASE_URL. Point it at an absolute path on a disk that survives a restart, " +
+        "for example file:/var/lib/g-arts/workspace.db. A relative path on an ephemeral filesystem loses every account without warning.",
+    );
+  }
   if (!parsed.CORS_ORIGIN.startsWith("https://")) throw new Error("Refusing to start in production unless CORS_ORIGIN uses https://");
   if (!parsed.YOUTUBE_DATA_API_KEY) throw new Error("Refusing to start in production without YOUTUBE_DATA_API_KEY for the verified Bengaluru feed");
 }

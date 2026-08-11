@@ -57,6 +57,8 @@ model User {
   deletedAt      DateTime?
   onboardingDismissedAt DateTime?
   onboardingCompletedAt DateTime?
+  /** Set only for accounts created after the interactive Guide was introduced. */
+  onboardingRequiredAt DateTime?
   translationWeeks TranslationArticleWeek[]
   gNewsTodos     GNewsTodo[]
 

@@ -1,9 +1,11 @@
+import { isPracticeToken, practiceRequest } from "./practice-store";
+
 const API_URL = import.meta.env.VITE_API_URL ?? "/api";
 
 export type Role = "SUPER_ADMIN" | "ADMIN" | "TEAM_LEAD" | "MEMBER" | "TRAINEE" | "GUEST";
 export type Team = "G_ARTS" | "TRANSLATION" | "G_NEWS";
-export type Member = { id: string; username: string; displayName: string; avatarUrl: string | null; accentColor: string | null; title: string | null; role: Role; team: Team; skills: string; availability: string; createdAt: string; deletedAt: string | null; onboardingDismissedAt: string | null; onboardingCompletedAt: string | null };
-export type Session = { token: string; user: Pick<Member, "id" | "username" | "displayName" | "avatarUrl" | "accentColor" | "title" | "role" | "team" | "onboardingDismissedAt" | "onboardingCompletedAt"> };
+export type Member = { id: string; username: string; displayName: string; avatarUrl: string | null; accentColor: string | null; title: string | null; role: Role; team: Team; skills: string; availability: string; createdAt: string; deletedAt: string | null; onboardingDismissedAt: string | null; onboardingCompletedAt: string | null; onboardingRequiredAt: string | null };
+export type Session = { token: string; user: Pick<Member, "id" | "username" | "displayName" | "avatarUrl" | "accentColor" | "title" | "role" | "team" | "onboardingDismissedAt" | "onboardingCompletedAt" | "onboardingRequiredAt"> };
 type Named = { displayName: string; username: string };
 /** `actor` and `target` are null when the account behind the id is gone. */
 export type AuditEntry = {
@@ -12,6 +14,9 @@ export type AuditEntry = {
 };
 
 export async function request<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
+  // Guide practice uses a completely isolated in-memory workspace. This check
+  // runs before fetch so a practice click can never reach the live API.
+  if (isPracticeToken(token)) return practiceRequest<T>(path, options);
   let response: Response;
   try {
     response = await fetch(`${API_URL}${path}`, {
@@ -58,6 +63,7 @@ export const updateOnboarding = (token: string, status: "skipped" | "completed")
   request<Session>("/users/me/onboarding", { method: "PATCH", body: JSON.stringify({ status }) }, token);
 
 export const uploadMyAvatar = async (token: string, file: File) => {
+  if (isPracticeToken(token)) throw new Error("Picture uploads are unavailable in practice mode. Your real profile is protected.");
   const body = new FormData();
   body.append("file", file);
   const response = await fetch(`${API_URL}/users/me/avatar`, {
@@ -75,6 +81,7 @@ export const removeMyAvatar = (token: string) =>
 /** Avatars are behind auth, so they are fetched once and held as a blob URL. */
 const avatarCache = new Map<string, Promise<string>>();
 export function avatarSrc(token: string, key: string): Promise<string> {
+  if (isPracticeToken(token)) return Promise.reject(new Error("Practice mode has no saved avatar"));
   let promise = avatarCache.get(key);
   if (!promise) {
     promise = fetch(`${API_URL}/users/avatars/${key}`, { headers: { Authorization: `Bearer ${token}` } })
@@ -96,6 +103,9 @@ export const forgetAvatar = (key: string) => avatarCache.delete(key);
 const SESSION_KEY = "g-arts.session";
 
 export function rememberSession(session: Session) {
+  // A Guide token is intentionally ephemeral. Never allow a component bug to
+  // turn a practice identity into the user's next real sign-in session.
+  if (isPracticeToken(session.token)) return;
   try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch { /* private mode */ }
 }
 
@@ -106,7 +116,9 @@ export function forgetSession() {
 export function storedSession(): Session | null {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
-    return raw ? (JSON.parse(raw) as Session) : null;
+    const stored = raw ? (JSON.parse(raw) as Session) : null;
+    if (stored && isPracticeToken(stored.token)) { localStorage.removeItem(SESSION_KEY); return null; }
+    return stored;
   } catch {
     return null;
   }
@@ -215,8 +227,6 @@ export type LibraryItem = { id: string; title: string; url: string; kind: Librar
 export const listLibrary = (token: string) => request<LibraryItem[]>("/library", {}, token);
 export const addLibraryItem = (token: string, data: { title: string; url: string; kind: LibraryKind }) =>
   request<LibraryItem>("/library", { method: "POST", body: JSON.stringify(data) }, token);
-export const deleteLibraryItem = (token: string, id: string) =>
-  request<{ deleted: true; title: string }>(`/library/${id}`, { method: "DELETE", body: JSON.stringify({ confirm: true }) }, token);
 export type LatestLibraryItem = { id: string; title: string; url: string; publishedAt: string };
 export type LatestLibraryFeed = { status: "ready" | "unconfigured" | "unavailable"; windowDays: 15; sourceUrl: string; refreshedAt: string; video: LatestLibraryItem[]; live: LatestLibraryItem[]; message?: string };
 export const latestLibrary = (token: string) => request<LatestLibraryFeed>("/library/latest", {}, token);

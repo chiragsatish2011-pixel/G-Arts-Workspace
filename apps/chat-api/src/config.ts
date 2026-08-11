@@ -9,9 +9,12 @@ loadEnv({ path: path.resolve(here, '..', '.env') });
 
 const INSECURE_SECRETS = new Set([
   'dev-secret-change-me',
+  'dev-only-replace-before-a-real-deployment-000000000000',
+  'dev-only-workspace-chat-service-token-000000000000',
   'change-this-to-a-secure-random-string-min-32-chars',
   'change-this-to-another-secure-random-string'
 ]);
+const insecureSecret = (value: string | undefined) => !value || INSECURE_SECRETS.has(value) || /^(?:local-|dev-only-|change-this|replace-before)/i.test(value);
 
 const bool = (fallback: boolean) =>
   z
@@ -61,13 +64,16 @@ if (!parsed.success) {
 
 const env = parsed.data;
 const isProduction = env.NODE_ENV === 'production';
+const corsOrigins = env.CORS_ORIGIN.split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
 
 // Fail fast rather than booting with a guessable signing key. Previously the
 // server fell back to a hard-coded secret whenever .env was not loaded, which
 // let anyone mint a valid admin token.
 if (isProduction) {
   const problems: string[] = [];
-  if (INSECURE_SECRETS.has(env.JWT_SECRET)) {
+  if (insecureSecret(env.JWT_SECRET)) {
     problems.push('JWT_SECRET is still set to a placeholder value');
   }
   if (env.JWT_SECRET.length < 32) {
@@ -75,6 +81,21 @@ if (isProduction) {
   }
   if (!env.REDIS_URL) {
     problems.push('REDIS_URL is required in production (sessions must survive restarts)');
+  }
+  if (!/^postgres(?:ql)?:\/\//i.test(env.DATABASE_URL)) {
+    problems.push('DATABASE_URL must point to PostgreSQL in production');
+  }
+  if (corsOrigins.some((origin) => !origin.startsWith('https://'))) {
+    problems.push('CORS_ORIGIN must contain only https:// origins in production');
+  }
+  if (insecureSecret(env.WORKSPACE_JWT_SECRET) || (env.WORKSPACE_JWT_SECRET?.length ?? 0) < 32) {
+    problems.push('WORKSPACE_JWT_SECRET is required in production and must be at least 32 characters');
+  }
+  if (insecureSecret(env.WORKSPACE_SERVICE_TOKEN) || (env.WORKSPACE_SERVICE_TOKEN?.length ?? 0) < 16) {
+    problems.push('WORKSPACE_SERVICE_TOKEN is required in production');
+  }
+  if (!env.WORKSPACE_URL?.startsWith('https://')) {
+    problems.push('WORKSPACE_URL must use https:// in production');
   }
   if (problems.length > 0) {
     console.error(`Refusing to start in production:\n  - ${problems.join('\n  - ')}`);
@@ -94,10 +115,6 @@ function resolveDatabaseUrl(url: string): string {
   if (path.isAbsolute(target)) return url;
   return `file:${path.resolve(here, '..', target)}`;
 }
-
-const corsOrigins = env.CORS_ORIGIN.split(',')
-  .map((o) => o.trim())
-  .filter(Boolean);
 
 export const config = {
   env: env.NODE_ENV,

@@ -10,6 +10,8 @@
     "build": "npm run build --workspace=@g-arts/chat-shared && npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "release:check": "npm run typecheck && npm test && npm run build && npm audit --omit=dev",
+    "preflight:production": "node scripts/preflight-production.mjs",
     "dev": "npm-run-all --parallel dev:*",
     "dev:api": "npm run dev --workspace=@g-arts/api",
     "dev:web": "npm run dev --workspace=@g-arts/web",

@@ -1,6 +1,7 @@
 node_modules/
 dist/
 *.log
+*.tsbuildinfo
 .DS_Store
 
 # Local databases and uploads hold real member data — never commit them.
@@ -15,3 +16,4 @@ packages/chat-db/generated/
 .env
 .env.*
 !.env.example
+!.env.production.example

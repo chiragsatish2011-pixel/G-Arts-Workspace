@@ -11,7 +11,8 @@ import { LibraryPanel } from "./LibraryPanel";
 import { TranslationArticleTracker } from "./TranslationArticleTracker";
 import { GNewsTodoPanel } from "./GNewsTodoPanel";
 import { GuideHub } from "./GuideHub";
-import { TrainingWorkspace } from "./TrainingWorkspace";
+import { PracticeCoach } from "./PracticeCoach";
+import { beginPractice, endPractice } from "./practice-store";
 
 /** A single short word is a first name; anything else reads better in full. */
 function firstName(displayName: string) {
@@ -38,6 +39,25 @@ const Monogram = ({ size = 34 }: { size?: number }) => (
 const Wordmark = ({ height = 22 }: { height?: number }) => (
   <img src="/gurukul-wordmark.svg" alt="Shree Swaminarayan Gurukul" style={{ height }} />
 );
+
+/** A short, visual hand-off while the workspace restores a saved session.
+ * It is deliberately local-only: refreshing never writes to or delays the API. */
+function BootScreen() {
+  return (
+    <main className="boot-screen" role="status" aria-label="Opening G-Arts Workspace">
+      <div className="boot-aura" aria-hidden />
+      <div className="boot-lockup">
+        <span className="boot-mark"><Monogram size={54} /></span>
+        <div>
+          <span className="eyebrow">SHREE SWAMINARAYAN GURUKUL BANGALORE</span>
+          <strong>G-Arts Workspace</strong>
+        </div>
+      </div>
+      <div className="boot-progress" aria-hidden><span /></div>
+      <p>Preparing your workspace</p>
+    </main>
+  );
+}
 
 /** Line-art marks, drawn in the same idiom as the icons on gurukul.org. */
 const Icon = ({ d, filled = false }: { d: string; filled?: boolean }) => (
@@ -143,11 +163,12 @@ function viewFromHash(): View {
 export function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [resuming, setResuming] = useState(true);
+  const [booting, setBooting] = useState(true);
   const [view, setViewState] = useState<View>(viewFromHash);
   const [logoutConfirm, setLogoutConfirm] = useState<ConfirmRequest | null>(null);
   const [showFirstGuide, setShowFirstGuide] = useState(false);
-  const [trainingRunning, setTrainingRunning] = useState(false);
-  const [trainingRun, setTrainingRun] = useState(0);
+  const [practiceSession, setPracticeSession] = useState<Session | null>(null);
+  const activeSession = practiceSession ?? session;
 
   const setView = (next: View) => {
     setViewState(next);
@@ -163,17 +184,25 @@ export function App() {
     return () => { live = false; };
   }, []);
 
+  // Keep the opening intentional and consistent on a refresh without turning
+  // it into a server request or touching any user/workspace data.
   useEffect(() => {
-    if (session?.user.team === "TRANSLATION" && view === "overview") setView("translation");
-    if (session?.user.team === "G_NEWS" && view !== "chat" && view !== "profile" && view !== "library" && view !== "g-news-todos") setView("chat");
-  }, [session?.user.team, view]);
+    const timer = window.setTimeout(() => setBooting(false), 1750);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
-    if (session && !session.user.onboardingDismissedAt && !session.user.onboardingCompletedAt) {
+    if (practiceSession) return;
+    if (session?.user.team === "TRANSLATION" && view === "overview") setView("translation");
+    if (session?.user.team === "G_NEWS" && view !== "chat" && view !== "profile" && view !== "library" && view !== "g-news-todos") setView("chat");
+  }, [session?.user.team, view, practiceSession]);
+
+  useEffect(() => {
+    if (session?.user.onboardingRequiredAt && !practiceSession && !session.user.onboardingDismissedAt && !session.user.onboardingCompletedAt) {
       setShowFirstGuide(true);
       setView("tutorial");
     }
-  }, [session]);
+  }, [session, practiceSession]);
 
   useEffect(() => {
     const onHash = () => setViewState(viewFromHash());
@@ -187,15 +216,17 @@ export function App() {
   // Re-read whenever the overview is shown, so adding someone updates the
   // figure instead of leaving a stale number on screen.
   useEffect(() => {
-    if (!session || view !== "overview") return;
-    if (!["SUPER_ADMIN", "ADMIN"].includes(session.user.role)) return;
-    listMembers(session.token).then((m) => setMemberCount(m.length)).catch(() => setMemberCount(null));
-  }, [session, view]);
+    if (!activeSession || view !== "overview") return;
+    if (!["SUPER_ADMIN", "ADMIN"].includes(activeSession.user.role)) return;
+    listMembers(activeSession.token).then((m) => setMemberCount(m.length)).catch(() => setMemberCount(null));
+  }, [activeSession, view]);
 
   useEffect(() => {
-    if (!session || view !== "overview") return;
-    if (session.user.team === "G_ARTS") listEvents(session.token, "upcoming").then(setUpcomingEvents).catch(() => setUpcomingEvents([]));
-  }, [session, view]);
+    if (!activeSession || view !== "overview") return;
+    if (activeSession.user.team === "G_ARTS") listEvents(activeSession.token, "upcoming").then(setUpcomingEvents).catch(() => setUpcomingEvents([]));
+  }, [activeSession, view]);
+
+  if (booting) return <BootScreen />;
 
   if (resuming) {
     return (
@@ -217,9 +248,14 @@ export function App() {
     );
   }
 
-  const canAdminister = ["SUPER_ADMIN", "ADMIN"].includes(session.user.role);
-  const translationWorkspace = session.user.team === "TRANSLATION";
-  const chatOnlyWorkspace = session.user.team === "G_NEWS";
+  // `session` was proven above; practice may replace it, never remove it.
+  const visibleSession = activeSession as Session;
+  // Practice changes data access only. The masthead must always show the real
+  // signed-in person, never a temporary practice identity.
+  const headerSession = session;
+  const canAdminister = ["SUPER_ADMIN", "ADMIN"].includes(visibleSession.user.role);
+  const translationWorkspace = visibleSession.user.team === "TRANSLATION";
+  const chatOnlyWorkspace = visibleSession.user.team === "G_NEWS";
   const todoItems = upcomingEvents.flatMap((event) => event.tasks.filter((task) => task.status === "not_done").map((task) => ({ event, task })));
 
   return (
@@ -235,16 +271,16 @@ export function App() {
           <div className="profile">
             <button className="profile-link" onClick={() => setView("profile")} title="Your profile">
               <span>
-                <span>{session.user.displayName}</span>
-                <small>@{session.user.username} · {session.user.role.replace("_", " ")}</small>
+                <span>{headerSession.user.displayName}</span>
+                <small>@{headerSession.user.username} · {headerSession.user.role.replace("_", " ")}</small>
               </span>
-              <AccountAvatar session={session} />
+              <AccountAvatar session={headerSession} />
             </button>
             <button className="text-button" onClick={() => setLogoutConfirm({
               title: "Sign out of G-Arts Workspace?",
               confirmLabel: "Sign out",
               body: <p>You can sign in again with your G-Arts account whenever you need to return.</p>,
-              onConfirm: () => { forgetSession(); setSession(null); setView("overview"); },
+              onConfirm: () => { endPractice(); setPracticeSession(null); forgetSession(); setSession(null); setView("overview"); },
             })}>Sign out</button>
           </div>
         </div>
@@ -276,34 +312,33 @@ export function App() {
 
         <section className={view === "chat" ? "content content-flush" : ["overview", "profile", "events", "logbook", "library", "translation"].includes(view) ? "content banded" : "content"}>
           {view === "events" ? (
-            <EventsPanel session={session} />
+            <EventsPanel session={visibleSession} />
           ) : view === "logbook" ? (
-            <LogbookPanel session={session} />
+            <LogbookPanel session={visibleSession} />
           ) : view === "chat" ? (
-            <ChatSpace session={session} onUnreadChange={setChatUnread} />
+            <ChatSpace session={visibleSession} practice={Boolean(practiceSession)} onUnreadChange={setChatUnread} />
           ) : view === "profile" ? (
-            <ProfilePanel session={session} onUpdated={(next) => { rememberSession(next); setSession(next); }} />
+            <ProfilePanel session={visibleSession} onUpdated={(next) => { if (practiceSession) setPracticeSession(next); else { rememberSession(next); setSession(next); } }} />
           ) : view === "admin" ? (
-            <AdminPanel session={session} />
+            <AdminPanel session={visibleSession} />
           ) : view === "library" ? (
-            <LibraryPanel session={session} />
+            <LibraryPanel session={visibleSession} />
           ) : view === "g-news-todos" ? (
-            <GNewsTodoPanel session={session} />
+            <GNewsTodoPanel session={visibleSession} />
           ) : view === "tutorial" ? (
-            trainingRunning ? <TrainingWorkspace key={trainingRun} session={session} onRestart={() => setTrainingRun((run) => run + 1)} onLeave={() => setTrainingRunning(false)} onFinished={() => { void updateOnboarding(session.token, "completed").then((next) => { rememberSession(next); setSession(next); }).catch(() => undefined); setTrainingRunning(false); setShowFirstGuide(false); setView("overview"); }} /> :
-              <GuideHub session={session} firstVisit={showFirstGuide} onStart={() => { setTrainingRun((run) => run + 1); setTrainingRunning(true); }} onSkip={() => { void updateOnboarding(session.token, "skipped").then((next) => { rememberSession(next); setSession(next); }).catch(() => undefined); setShowFirstGuide(false); setView("overview"); }} />
+            <GuideHub session={session} firstVisit={showFirstGuide} onStart={() => { setPracticeSession(beginPractice(session)); setShowFirstGuide(false); setView("overview"); }} onSkip={() => { void updateOnboarding(session.token, "skipped").then((next) => { rememberSession(next); setSession(next); }).catch(() => undefined); setShowFirstGuide(false); setView("overview"); }} />
           ) : view === "translation" ? (
-            <TranslationArticleTracker session={session} />
+            <TranslationArticleTracker session={visibleSession} />
           ) : (
             <>
               <div className="band band-maroon">
                 <div className="band-inner home">
                   <div className="home-head">
                     <span className="eyebrow">{today()}</span>
-                    <h1>{greeting()}, {firstName(session.user.displayName)}.</h1>
+                    <h1>{greeting()}, {firstName(visibleSession.user.displayName)}.</h1>
                     <p>
-                      <span className="role-word">{session.user.role.replace("_", " ").toLowerCase()}</span>
-                      {" · @"}{session.user.username}
+                      <span className="role-word">{visibleSession.user.role.replace("_", " ").toLowerCase()}</span>
+                      {" · @"}{visibleSession.user.username}
                     </p>
                   </div>
 
@@ -347,6 +382,7 @@ export function App() {
         </section>
       </div>
       <ConfirmDialog request={logoutConfirm} onClose={() => setLogoutConfirm(null)} />
+      {practiceSession && <PracticeCoach session={practiceSession} view={view} onLeave={() => { endPractice(); setPracticeSession(null); setView("tutorial"); }} onComplete={() => { endPractice(); setPracticeSession(null); void updateOnboarding(session.token, "completed").then((next) => { rememberSession(next); setSession(next); }).catch(() => undefined); setShowFirstGuide(false); setView("overview"); }} />}
     </div>
   );
 }

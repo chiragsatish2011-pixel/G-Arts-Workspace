@@ -128,7 +128,7 @@ export function ProfilePanel({ session, onUpdated }: { session: Session; onUpdat
         <div className="profile-grid">
           <section className="admin-section">
             <h2>Details</h2>
-            <form className="profile-form" onSubmit={save}>
+            <form className="profile-form" data-practice="profile-form" onSubmit={save}>
               <label>Your name<input value={displayName} onChange={(e) => setDisplayName(e.target.value)} minLength={2} required /></label>
               <label>Role or title<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Videography and Editing" /></label>
 

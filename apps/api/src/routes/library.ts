@@ -22,14 +22,4 @@ export const libraryRoutes: FastifyPluginAsync = async (app) => {
     return reply.code(201).send(await prisma.libraryItem.create({ data: { ...body.data, createdById: request.user.sub } }));
   });
 
-  app.delete("/:id", { preHandler: canUseLibrary }, async (request, reply) => {
-    if (!["SUPER_ADMIN", "ADMIN"].includes(request.user.role)) return reply.code(403).send({ error: "Only an administrator can remove library links" });
-    const params = z.object({ id: z.string().cuid() }).safeParse(request.params);
-    const body = z.object({ confirm: z.literal(true) }).safeParse(request.body);
-    if (!params.success || !body.success) return reply.code(400).send({ error: "Deletion must be confirmed" });
-    const item = await prisma.libraryItem.findUnique({ where: { id: params.data.id } });
-    if (!item) return reply.code(404).send({ error: "Library item not found" });
-    await prisma.libraryItem.delete({ where: { id: item.id } });
-    return { deleted: true, title: item.title };
-  });
 };

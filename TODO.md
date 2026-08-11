@@ -34,6 +34,17 @@ of these records automatically.
   schedule blocks, notes, reading list, article stages and admin read-only
   oversight. No reminder notifications are sent until their channel/rules are
   explicitly chosen.
+- Guide is a role-aware, hands-on practice route. G-Arts, G-Arts admin,
+  Translation and G-News each receive only the route and permissions that
+  match their workspace. It runs through the real screens with an isolated,
+  temporary practice store; leaving, completing or restarting wipes every
+  sample event, link, to-do, schedule entry and chat action.
+- The practice route covers the role’s own work, Library, Chat (message,
+  attachment, voice and focused group), and Account without using real data.
+- The workspace opens with a short branded loading screen on refresh. It is
+  visual only: it does not send any extra requests or change live data.
+- Shared Music links are saved permanently. Video and Live are the only
+  automatically refreshed library sections.
 
 ## Requirements G Arts needs to supply before the next build slice
 
@@ -52,6 +63,9 @@ of these records automatically.
    rows from a screenshot.
 6. Translation schedule and reminder rules: the triggering time, audience,
    delivery channel and who may change each rule.
+7. Decide whether the guided practice needs a server-persisted sandbox for
+   analytics or multi-device continuation. It is currently intentionally
+   disposable and local so it cannot affect the live workspace.
 
 ## Non-negotiable guardrails
 

@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { addLibraryItem, deleteLibraryItem, latestLibrary, listLibrary, type LatestLibraryFeed, type LatestLibraryItem, type LibraryItem, type Session } from "./api";
-import { ConfirmDialog, type ConfirmRequest } from "./Modal";
+import { addLibraryItem, latestLibrary, listLibrary, type LatestLibraryFeed, type LatestLibraryItem, type LibraryItem, type Session } from "./api";
 
 function PostList({ items, empty }: { items: LatestLibraryItem[]; empty: string }) {
   return items.length === 0 ? <p className="library-empty">{empty}</p> : <div className="library-posts">{items.map((item) => (
@@ -24,8 +23,6 @@ export function LibraryPanel({ session }: { session: Session }) {
   const [latest, setLatest] = useState<LatestLibraryFeed | null>(null);
   const [notice, setNotice] = useState("");
   const [form, setForm] = useState({ title: "", url: "" });
-  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
-  const canRemove = ["SUPER_ADMIN", "ADMIN"].includes(session.user.role);
   const source = latest?.sourceUrl ?? "https://www.youtube.com/playlist?list=PLkmuZGTLO5rRNeCpAt5LUg2gyaZdguHnf";
   const reload = () => {
     void listLibrary(session.token).then(setItems).catch((e: unknown) => setNotice(e instanceof Error ? e.message : "Could not load music links"));
@@ -69,16 +66,15 @@ export function LibraryPanel({ session }: { session: Session }) {
     </div>
 
     <section className="library-music">
-      <header><div><span className="eyebrow">MUSIC</span><h2>Shared music links</h2><p>Paste an existing secure link. No music files are uploaded or stored in this workspace.</p></div></header>
-      <form className="library-add" onSubmit={submit}>
+      <header><div><span className="eyebrow">MUSIC</span><h2>Shared music links</h2><p>Paste an existing secure link. Music is stored as a permanent shared link; it does not refresh or disappear with the Video and Live feed.</p></div></header>
+      <form className="library-add" data-practice="music-form" onSubmit={submit}>
         <label>Title<input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="For example, Prarthana" /></label>
         <label>Link<input required type="url" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://…" /></label>
         <button>Add link</button>
       </form>
       <div className="library-music-list">
-        {music.length === 0 ? <p className="library-empty">No music links yet. Add the first one above.</p> : music.map((item) => <article key={item.id}><a href={item.url} target="_blank" rel="noreferrer"><span className="library-music-note" aria-hidden>♫</span><strong>{item.title}</strong><small>Open link ↗</small></a>{canRemove && <button type="button" className="library-remove" onClick={() => setConfirm({ title: "Remove music link?", body: <p><strong>{item.title}</strong> will be removed from the shared Library. The original link will not be changed.</p>, confirmLabel: "Remove", destructive: true, onConfirm: async () => { try { await deleteLibraryItem(session.token, item.id); setNotice("Music link removed."); reload(); } catch (e) { setNotice(e instanceof Error ? e.message : "Could not remove the music link"); } } })}>Remove</button>}</article>)}
+        {music.length === 0 ? <p className="library-empty">No music links yet. Add the first one above.</p> : music.map((item) => <article key={item.id}><a href={item.url} target="_blank" rel="noreferrer"><span className="library-music-note" aria-hidden>♫</span><strong>{item.title}</strong><small>Open link ↗</small></a></article>)}
       </div>
     </section>
-    <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
   </section>;
 }

@@ -7,6 +7,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.resolve(here, "..", ".env") });
 
 const environment = z.object({
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   DATABASE_URL: z.string().default("file:./dev.db"),
   JWT_SECRET: z.string().min(32).default("local-dev-garts-workspace-signing-secret-2026-only"),
   BOOTSTRAP_SECRET: z.string().min(16).default("local-bootstrap-garts-workspace-2026-secret"),
@@ -39,16 +40,17 @@ const parsed = environment.parse(process.env);
 /** Local development can start from known non-production values. A deployed
  * service must never quietly use them: anyone who knows a repository can
  * otherwise forge sessions or call the Workspace↔Chat integration. */
-if (process.env.NODE_ENV === "production") {
-  const defaults = {
-    JWT_SECRET: "local-dev-garts-workspace-signing-secret-2026-only",
-    BOOTSTRAP_SECRET: "local-bootstrap-garts-workspace-2026-secret",
-    CHAT_SERVICE_TOKEN: "local-dev-garts-workspace-service-token-2026",
-  } as const;
-  const missing = Object.entries(defaults)
-    .filter(([key, value]) => !process.env[key] || process.env[key] === value)
-    .map(([key]) => key);
+if (parsed.NODE_ENV === "production") {
+  const unsafeSecret = (value: string | undefined) => !value || /^(?:local-|dev-only-|change-this|replace-before)/i.test(value);
+  const missing = [
+    ["JWT_SECRET", parsed.JWT_SECRET],
+    ["BOOTSTRAP_SECRET", parsed.BOOTSTRAP_SECRET],
+    ["CHAT_SERVICE_TOKEN", parsed.CHAT_SERVICE_TOKEN],
+  ].filter(([, value]) => unsafeSecret(value)).map(([key]) => key);
   if (missing.length > 0) throw new Error(`Refusing to start in production without non-default ${missing.join(", ")}`);
+  if (!/^postgres(?:ql)?:\/\//i.test(parsed.DATABASE_URL)) throw new Error("Refusing to start in production without a PostgreSQL DATABASE_URL");
+  if (!parsed.CORS_ORIGIN.startsWith("https://")) throw new Error("Refusing to start in production unless CORS_ORIGIN uses https://");
+  if (!parsed.YOUTUBE_DATA_API_KEY) throw new Error("Refusing to start in production without YOUTUBE_DATA_API_KEY for the verified Bengaluru feed");
 }
 
 export const env = parsed;

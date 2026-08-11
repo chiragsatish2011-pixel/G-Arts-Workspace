@@ -47,7 +47,7 @@ const newUser = z.object({
 const publicUser = {
   id: true, username: true, displayName: true, avatarUrl: true, accentColor: true,
   title: true, role: true, team: true, skills: true, availability: true, createdAt: true, deletedAt: true,
-  onboardingDismissedAt: true, onboardingCompletedAt: true,
+  onboardingDismissedAt: true, onboardingCompletedAt: true, onboardingRequiredAt: true,
 } as const;
 
 /**
@@ -80,7 +80,7 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
     if (taken) return reply.code(409).send({ error: `The username @${body.data.username} is already taken` });
 
     const user = await prisma.user.create({
-      data: { ...body.data, passwordHash: await bcrypt.hash(DEFAULT_MEMBER_PASSWORD, 12) },
+      data: { ...body.data, passwordHash: await bcrypt.hash(DEFAULT_MEMBER_PASSWORD, 12), onboardingRequiredAt: new Date() },
       select: publicUser,
     });
     try {
@@ -274,7 +274,7 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
     const user = await prisma.user.update({
       where: { id: request.user.sub },
       data: body.data,
-      select: { id: true, username: true, displayName: true, avatarUrl: true, title: true, bio: true, accentColor: true, role: true, team: true, onboardingDismissedAt: true, onboardingCompletedAt: true },
+      select: { id: true, username: true, displayName: true, avatarUrl: true, title: true, bio: true, accentColor: true, role: true, team: true, onboardingDismissedAt: true, onboardingCompletedAt: true, onboardingRequiredAt: true },
     });
     // Chat holds a projection of workspace identities for member lists and
     // message attribution. Refresh it at the authoritative write, rather
@@ -307,7 +307,7 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
     const user = await prisma.user.update({
       where: { id: request.user.sub },
       data: body.data.status === "completed" ? { onboardingCompletedAt: now } : { onboardingDismissedAt: now },
-      select: { id: true, username: true, displayName: true, avatarUrl: true, title: true, bio: true, accentColor: true, role: true, team: true, onboardingDismissedAt: true, onboardingCompletedAt: true },
+      select: { id: true, username: true, displayName: true, avatarUrl: true, title: true, bio: true, accentColor: true, role: true, team: true, onboardingDismissedAt: true, onboardingCompletedAt: true, onboardingRequiredAt: true },
     });
     const token = await reply.jwtSign({ sub: user.id, username: user.username, displayName: user.displayName, role: user.role });
     return { token, user };

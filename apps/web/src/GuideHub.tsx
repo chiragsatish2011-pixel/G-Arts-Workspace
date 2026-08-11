@@ -18,9 +18,9 @@ export function GuideHub({ session, firstVisit, onStart, onSkip }: Props) {
       <div className="guide-orb" aria-hidden="true">G</div>
       <span className="eyebrow">G-ARTS GUIDED PRACTICE</span>
       <h1>{firstVisit ? "Welcome. Let’s learn the workspace by using it." : "Guided practice"}</h1>
-      <p>This is a five-minute, hands-on route through your workspace. You will click the real areas, then complete small practice actions that stay inside the guide and are never saved as real work.</p>
+      <p>This is a five-minute, hands-on route through a separate Training Workspace. It looks and works like the real workspace, but every event, chat message, file, schedule note and profile change is sample data only.</p>
       <div className="guide-actions">
-        <button className="primary" type="button" onClick={onStart}>Start guided practice <span>→</span></button>
+        <button className="primary" type="button" onClick={onStart}>Enter training workspace <span>→</span></button>
         <button className="guide-skip" type="button" onClick={onSkip}>{firstVisit ? "Skip for now" : "Back to workspace"}</button>
       </div>
       {firstVisit && <small>You can skip now and restart this from Guide whenever you want.</small>}
@@ -29,6 +29,6 @@ export function GuideHub({ session, firstVisit, onStart, onSkip }: Props) {
       <header><span>YOUR FIVE-MINUTE ROUTE</span><strong>{route.length} missions</strong></header>
       <ol>{route.map((mission, index) => <li key={mission}><i>{index + 1}</i><div><strong>{mission.split(":")[0]}</strong><p>{mission.includes(":") ? mission.slice(mission.indexOf(":") + 1).trim() : mission}</p></div><span>Practice</span></li>)}</ol>
     </section>
-    <p className="guide-assurance"><b>Training mode is separate.</b> It cannot create an event, task, schedule entry, chat message, profile change, or library link.</p>
+    <p className="guide-assurance"><b>Training mode is separate.</b> It uses temporary practice records in this browser only and wipes them whenever you reset or leave.</p>
   </main>;
 }

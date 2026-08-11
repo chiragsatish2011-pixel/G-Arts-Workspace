@@ -10,8 +10,8 @@ import { ProfilePanel } from "./ProfilePanel";
 import { LibraryPanel } from "./LibraryPanel";
 import { TranslationArticleTracker } from "./TranslationArticleTracker";
 import { GNewsTodoPanel } from "./GNewsTodoPanel";
-import { TutorialPanel } from "./TutorialPanel";
 import { GuideHub } from "./GuideHub";
+import { TrainingWorkspace } from "./TrainingWorkspace";
 
 /** A single short word is a first name; anything else reads better in full. */
 function firstName(displayName: string) {
@@ -146,7 +146,8 @@ export function App() {
   const [view, setViewState] = useState<View>(viewFromHash);
   const [logoutConfirm, setLogoutConfirm] = useState<ConfirmRequest | null>(null);
   const [showFirstGuide, setShowFirstGuide] = useState(false);
-  const [tourRunning, setTourRunning] = useState(false);
+  const [trainingRunning, setTrainingRunning] = useState(false);
+  const [trainingRun, setTrainingRun] = useState(0);
 
   const setView = (next: View) => {
     setViewState(next);
@@ -289,7 +290,8 @@ export function App() {
           ) : view === "g-news-todos" ? (
             <GNewsTodoPanel session={session} />
           ) : view === "tutorial" ? (
-            <GuideHub session={session} firstVisit={showFirstGuide} onStart={() => setTourRunning(true)} onSkip={() => { void updateOnboarding(session.token, "skipped").then((next) => { rememberSession(next); setSession(next); }).catch(() => undefined); setShowFirstGuide(false); setView("overview"); }} />
+            trainingRunning ? <TrainingWorkspace key={trainingRun} session={session} onRestart={() => setTrainingRun((run) => run + 1)} onLeave={() => setTrainingRunning(false)} onFinished={() => { void updateOnboarding(session.token, "completed").then((next) => { rememberSession(next); setSession(next); }).catch(() => undefined); setTrainingRunning(false); setShowFirstGuide(false); setView("overview"); }} /> :
+              <GuideHub session={session} firstVisit={showFirstGuide} onStart={() => { setTrainingRun((run) => run + 1); setTrainingRunning(true); }} onSkip={() => { void updateOnboarding(session.token, "skipped").then((next) => { rememberSession(next); setSession(next); }).catch(() => undefined); setShowFirstGuide(false); setView("overview"); }} />
           ) : view === "translation" ? (
             <TranslationArticleTracker session={session} />
           ) : (
@@ -344,7 +346,6 @@ export function App() {
           )}
         </section>
       </div>
-      {tourRunning && <TutorialPanel session={session} onFinished={(next) => { rememberSession(next); setSession(next); setTourRunning(false); setShowFirstGuide(false); setView("overview"); }} />}
       <ConfirmDialog request={logoutConfirm} onClose={() => setLogoutConfirm(null)} />
     </div>
   );

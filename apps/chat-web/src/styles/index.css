@@ -1,0 +1,247 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* --------------------------------------------------------------------------
+   Design tokens — Gurukul brand
+
+   Colours are taken from the marks on gurukul.org:
+     crimson  #CC0000  (monogram)
+     saffron  #DF6420  (wordmark)
+     ink      #2B2A29  (wordmark text)
+   The palette is light and warm by default, matching the school's own site.
+   -------------------------------------------------------------------------- */
+
+:root,
+[data-theme='light'] {
+  --c-canvas: 245 241 233; /* warm paper — the chrome */
+  --c-surface: 255 255 255; /* the reading surface */
+  --c-raised: 250 247 241;
+  --c-sunken: 236 231 221;
+  --c-line: 226 219 206;
+  --c-line-soft: 237 232 223;
+
+  --c-ink: 43 42 41; /* #2B2A29 */
+  --c-ink-soft: 92 89 85;
+  --c-ink-faint: 140 136 128;
+
+  --c-brand: 204 0 0; /* #CC0000 — the site's accent red */
+  --c-brand-soft: 252 235 234;
+  --c-brand-deep: 122 18 22; /* #7A1216 — the site's maroon block */
+  --c-saffron: 223 100 32; /* #DF6420 */
+  --c-jade: 47 133 98;
+  --c-gold: 181 132 34;
+  --c-danger: 179 38 30;
+
+  /* Incoming: white on warm paper. Outgoing: a warm brand tint with enough
+     saturation to separate at a glance — the same job WhatsApp's green does.
+     A full-strength crimson slab reads as an alert, not as speech. */
+  --c-bubble: 255 255 255;
+  --c-bubble-own: 250 218 210;
+
+  --shadow-card: 0 1px 2px rgb(43 42 41 / 0.04), 0 4px 14px -6px rgb(43 42 41 / 0.09);
+  --shadow-float: 0 2px 6px rgb(43 42 41 / 0.06), 0 12px 30px -10px rgb(43 42 41 / 0.16);
+  --shadow-pop: 0 10px 40px -8px rgb(43 42 41 / 0.22);
+}
+
+/* Optional, off by default. Kept warm so it still reads as the same brand. */
+[data-theme='dark'] {
+  --c-canvas: 26 22 20;
+  --c-surface: 34 29 26;
+  --c-raised: 43 37 33;
+  --c-sunken: 29 25 22;
+  --c-line: 58 50 45;
+  --c-line-soft: 47 41 36;
+
+  --c-ink: 245 240 232;
+  --c-ink-soft: 172 163 152;
+  --c-ink-faint: 124 115 105;
+
+  --c-brand: 232 76 76;
+  --c-brand-soft: 58 28 28;
+  --c-brand-deep: 204 0 0;
+  --c-saffron: 235 132 70;
+  --c-jade: 86 176 136;
+  --c-gold: 214 166 76;
+  --c-danger: 226 92 84;
+
+  --c-bubble: 43 37 33;
+  --c-bubble-own: 74 32 30;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 16px -6px rgb(0 0 0 / 0.5);
+  --shadow-float: 0 2px 8px rgb(0 0 0 / 0.45), 0 16px 40px -12px rgb(0 0 0 / 0.6);
+  --shadow-pop: 0 12px 48px -8px rgb(0 0 0 / 0.7);
+}
+
+@layer base {
+  * {
+    @apply border-line;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'ss01';
+    text-rendering: optimizeLegibility;
+    overscroll-behavior: none;
+  }
+
+  ::selection {
+    background: rgb(var(--c-saffron) / 0.25);
+  }
+
+  /* Only controls that have no focus styling of their own get the ring.
+     Text fields style their own focus, and a ring drawn inside a composer
+     shell looks like a rendering fault. */
+  :where(a, button, [role='button'], summary, [tabindex]:not(input):not(textarea)):focus-visible {
+    @apply outline-none ring-2 ring-brand/45 ring-offset-2 ring-offset-canvas;
+  }
+
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    @apply outline-none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .surface-card {
+    @apply bg-surface border border-line rounded-2xl shadow-card;
+  }
+
+  .scroll-slim {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--c-line)) transparent;
+  }
+  .scroll-slim::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  .scroll-slim::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scroll-slim::-webkit-scrollbar-thumb {
+    background: rgb(var(--c-line));
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  .scroll-slim::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--c-ink-faint));
+    background-clip: content-box;
+  }
+
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .skeleton {
+    @apply relative overflow-hidden bg-sunken rounded-lg;
+  }
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full animate-shimmer;
+    background: linear-gradient(90deg, transparent, rgb(var(--c-ink) / 0.06), transparent);
+  }
+
+  /* Scoped palette flip: a deep Gurukul maroon panel with light type, while
+     the conversation beside it stays on paper. */
+  .panel-dark {
+    /* The maroon block from gurukul.org, used as a full panel. */
+    --c-canvas: 122 18 22;
+    --c-surface: 138 24 28;
+    --c-raised: 150 30 34;
+    --c-sunken: 152 32 36;
+    --c-line: 163 44 48;
+    --c-line-soft: 146 30 34;
+    --c-ink: 255 250 249;
+    --c-ink-soft: 240 206 203;
+    --c-ink-faint: 226 168 164;
+    --c-brand: 255 255 255;
+    --c-brand-soft: 165 46 50;
+    --c-brand-deep: 255 236 234;
+    --shadow-card: 0 1px 2px rgb(60 4 8 / 0.28);
+  }
+
+  /* Bubble tails. Drawn as a clipped block in the bubble's own colour so a
+     message is visually anchored to whoever said it. */
+  .bubble-tail-right::after,
+  .bubble-tail-left::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    width: 9px;
+    height: 14px;
+    pointer-events: none;
+  }
+  .bubble-tail-right::after {
+    right: -7px;
+    background: rgb(var(--c-bubble-own));
+    clip-path: polygon(0 0, 0 100%, 100% 100%);
+    border-bottom-right-radius: 12px;
+  }
+  .bubble-tail-left::after {
+    left: -7px;
+    background: rgb(var(--c-bubble));
+    clip-path: polygon(100% 0, 100% 100%, 0 100%);
+    border-bottom-left-radius: 12px;
+  }
+
+  /* Hairline used between the three columns. */
+  .rule-v {
+    @apply w-px shrink-0 bg-line;
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Big, light display heading — the site sets its section titles this way. */
+  .display-title {
+    @apply font-display font-normal tracking-[-0.01em] text-ink;
+    font-size: clamp(1.5rem, 2.4vw, 2.15rem);
+    line-height: 1.15;
+  }
+
+  /* The site's stat treatment: a large red numeral over a quiet label. */
+  .stat-figure {
+    @apply font-display text-brand tabular;
+    font-size: clamp(1.6rem, 2.6vw, 2.25rem);
+    line-height: 1;
+  }
+
+  /* Section label used across the sidebar and side panel. */
+  .eyebrow {
+    @apply text-2xs font-semibold uppercase tracking-[0.13em] text-ink-faint;
+  }
+}
+
+@layer utilities {
+  .drag-none {
+    -webkit-user-drag: none;
+    user-select: none;
+  }
+
+  .mask-fade-b {
+    mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
+  }
+}

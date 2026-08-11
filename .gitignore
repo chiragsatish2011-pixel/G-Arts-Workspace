@@ -1,0 +1,17 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Local databases and uploads hold real member data — never commit them.
+*.db
+*.db-wal
+*.db-shm
+backups/
+apps/*/uploads/
+packages/chat-db/generated/
+
+# Secrets
+.env
+.env.*
+!.env.example

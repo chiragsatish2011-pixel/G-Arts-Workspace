@@ -1,0 +1,31 @@
+{
+  "name": "g-arts-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=@g-arts/chat-shared && npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "dev": "npm-run-all --parallel dev:*",
+    "dev:api": "npm run dev --workspace=@g-arts/api",
+    "dev:web": "npm run dev --workspace=@g-arts/web",
+    "dev:chat-api": "npm run dev --workspace=@g-arts/chat-api",
+    "dev:chat-web": "npm run dev --workspace=@g-arts/chat-web",
+    "db:generate": "npm run prisma:generate --workspace=@g-arts/api",
+    "db:migrate": "npm run prisma:migrate --workspace=@g-arts/api",
+    "db:push": "npm run prisma:push --workspace=@g-arts/api",
+    "db:seed": "npm run prisma:seed --workspace=@g-arts/api",
+    "chat:db:push": "npm run db:push --workspace=@g-arts/chat-api",
+    "chat:db:seed": "npm run db:seed --workspace=@g-arts/chat-api"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "npm-run-all": "^4.1.5"
+  }
+}

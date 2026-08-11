@@ -1,0 +1,32 @@
+{
+  "name": "@g-arts/chat-db",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Prisma schema and generated client for G Arts Chat.",
+  "main": "./generated/index.js",
+  "types": "./generated/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./generated/index.d.ts",
+      "default": "./generated/index.js"
+    }
+  },
+  "scripts": {
+    "generate": "prisma generate --schema prisma/schema.prisma",
+    "build": "prisma generate --schema prisma/schema.prisma",
+    "db:push": "prisma db push --schema prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev --schema prisma/schema.prisma",
+    "db:seed": "tsx prisma/seed.ts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0",
+    "tsx": "^4.16.0"
+  }
+}

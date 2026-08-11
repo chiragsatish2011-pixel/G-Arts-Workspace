@@ -1,0 +1,289 @@
+generator client {
+  provider = "prisma-client-js"
+  // Generated into this package rather than the shared node_modules/.prisma,
+  // because the Workspace API owns a second, different schema. Two default
+  // outputs would overwrite each other and break whichever generated first.
+  output   = "../generated"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// People
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String    @id @default(cuid())
+  // Set when this member is mirrored from the G Arts Workspace. The Workspace
+  // owns the account; chat holds a local projection of it so messages have a
+  // stable author even if the Workspace is unreachable.
+  workspaceUserId String? @unique
+  username     String    @unique
+  passwordHash String
+  displayName  String
+  avatarUrl    String?
+  accentColor  String?
+  title        String?
+  bio          String?
+  role         String    @default("member")
+  // Presence the member chose ("online" | "away" | "busy" | "offline").
+  // Defaults to online; whether they are actually reachable is isConnected.
+  status       String    @default("online")
+  // Free-text status line, e.g. "In class until 4".
+  statusText   String?
+  // True while at least one socket is connected. Kept separate from `status`
+  // so a member can be manually "busy" while genuinely connected.
+  isConnected  Boolean   @default(false)
+  lastSeenAt   DateTime?
+  disabledAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  messages      Message[]
+  reactions     Reaction[]
+  sessions      Session[]
+  memberships   ChannelMember[]
+  ownedChannels Channel[]       @relation("ChannelOwner")
+  voiceSessions VoiceSession[]
+  uploads       Attachment[]    @relation("AttachmentUploader")
+  mentions      Mention[]
+  pinnedItems   Message[]       @relation("MessagePinner")
+
+  @@index([username])
+  @@index([status])
+}
+
+model Session {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique
+  // Rotation chain: when a token is rotated we keep the old row briefly and
+  // point it at its replacement so replay of a stolen token is detectable.
+  replacedBy String?
+  revokedAt  DateTime?
+  deviceInfo String?
+  ip         String?
+  expiresAt  DateTime
+  lastUsedAt DateTime  @default(now())
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Conversations
+//
+// A channel, a group and a 1:1 DM are all the same row shape. That keeps a
+// single send path, a single receipt path and a single unread path for every
+// kind of conversation.
+// ---------------------------------------------------------------------------
+
+model Channel {
+  id          String  @id @default(cuid())
+  // "channel" (named room) | "dm" (exactly two members) | "group" (ad-hoc set)
+  kind        String  @default("channel")
+  name        String
+  slug        String? @unique
+  description String?
+  topic       String?
+  // "text" | "voice" | "announcement"
+  type        String  @default("text")
+  icon        String?
+  isPrivate   Boolean @default(false)
+  isArchived  Boolean @default(false)
+  // Sorted "userIdA:userIdB" for DMs. Unique, so opening a DM is idempotent
+  // and two people can never end up in two parallel threads.
+  dmKey       String? @unique
+
+  // Binds a channel to the Workspace object it belongs to — an Event or a
+  // Project. The Workspace stores only the resulting channel id, so messages
+  // are never duplicated across the two databases.
+  workspaceKind String?
+  workspaceId   String?
+
+  parentId    String?
+  position    Int       @default(0)
+  createdById String
+  lastMessageAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  createdBy User            @relation("ChannelOwner", fields: [createdById], references: [id])
+  parent    Channel?        @relation("ChannelHierarchy", fields: [parentId], references: [id])
+  children  Channel[]       @relation("ChannelHierarchy")
+  messages  Message[]
+  members   ChannelMember[]
+
+  @@unique([workspaceKind, workspaceId])
+  @@index([slug])
+  @@index([type])
+  @@index([kind])
+  @@index([lastMessageAt])
+}
+
+model ChannelMember {
+  id        String @id @default(cuid())
+  channelId String
+  userId    String
+  // "owner" | "admin" | "member"
+  role      String @default("member")
+
+  // Read/delivery cursors. Storing a cursor per member is O(members) instead
+  // of the O(messages x members) a per-message receipt table would cost, and
+  // it still yields exact WhatsApp-style sent/delivered/read ticks.
+  lastReadMessageId String?
+  lastReadAt        DateTime?
+  lastDeliveredAt   DateTime?
+
+  // "all" | "mentions" | "none"
+  notifyLevel String    @default("all")
+  mutedUntil  DateTime?
+  isFavorite  Boolean   @default(false)
+  // Hidden DMs stay in the database but drop out of the sidebar until the
+  // next message arrives.
+  hiddenAt    DateTime?
+  joinedAt    DateTime  @default(now())
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@index([userId])
+  @@index([channelId])
+}
+
+// ---------------------------------------------------------------------------
+// Messages
+// ---------------------------------------------------------------------------
+
+model Message {
+  id        String @id @default(cuid())
+  channelId String
+  userId    String
+  content   String
+  // "text" | "file" | "voice" | "system"
+  type      String @default("text")
+
+  replyToId String?
+  // Client-generated idempotency key. A retried send (flaky network, socket
+  // reconnect) resolves to the same row instead of duplicating the message.
+  clientNonce String?
+
+  editedAt   DateTime?
+  deletedAt  DateTime?
+  pinnedAt   DateTime?
+  pinnedById String?
+  createdAt  DateTime  @default(now())
+
+  channel     Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id])
+  pinnedBy    User?        @relation("MessagePinner", fields: [pinnedById], references: [id])
+  replyTo     Message?     @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies     Message[]    @relation("MessageReplies")
+  reactions   Reaction[]
+  attachments Attachment[]
+  mentions    Mention[]
+
+  @@unique([channelId, userId, clientNonce])
+  @@index([channelId, createdAt])
+  @@index([channelId, pinnedAt])
+  @@index([userId])
+  @@index([replyToId])
+}
+
+model Reaction {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+}
+
+model Mention {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  // "user" | "everyone"
+  kind      String   @default("user")
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([userId, readAt])
+}
+
+model Attachment {
+  id String @id @default(cuid())
+  // "message" | "avatar". An avatar legitimately has no message attached, so
+  // the orphan sweeper must not treat it as an abandoned upload.
+  purpose      String  @default("message")
+  // Null between "file uploaded" and "message sent". Orphans are swept by the
+  // janitor so a cancelled compose does not leak disk.
+  messageId    String?
+  uploadedById String
+  fileName     String
+  fileSize     Int
+  mimeType     String
+  storageKey   String  @unique
+  width        Int?
+  height       Int?
+  durationMs   Int?
+  // Blurred base64 placeholder shown while the full image decodes.
+  placeholder  String?
+  createdAt    DateTime @default(now())
+
+  message    Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  uploadedBy User     @relation("AttachmentUploader", fields: [uploadedById], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@index([uploadedById, messageId])
+  @@index([purpose, messageId])
+}
+
+// ---------------------------------------------------------------------------
+// Realtime extras
+// ---------------------------------------------------------------------------
+
+model VoiceSession {
+  id        String   @id @default(cuid())
+  channelId String
+  userId    String
+  socketId  String?
+  muted     Boolean  @default(false)
+  deafened  Boolean  @default(false)
+  sharing   Boolean  @default(false)
+  joinedAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@index([channelId])
+}
+
+model Invite {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  createdById String
+  usedById    String?
+  expiresAt   DateTime?
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([code])
+}

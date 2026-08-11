@@ -1,0 +1,335 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  TEAM_LEAD
+  MEMBER
+  TRAINEE
+  GUEST
+}
+
+enum Availability {
+  AVAILABLE
+  BUSY
+  ON_EVENT
+  UNAVAILABLE
+}
+
+/** A person's workspace area. This is separate from their security role. */
+enum Team {
+  G_ARTS
+  TRANSLATION
+}
+
+enum LibraryKind {
+  MUSIC
+  VIDEO
+  LIVE
+}
+
+model User {
+  id             String          @id @default(cuid())
+  username       String          @unique
+  displayName    String
+  passwordHash   String
+  avatarUrl      String?
+  accentColor    String?
+  title          String?
+  bio            String?
+  role           Role            @default(MEMBER)
+  team           Team            @default(G_ARTS)
+  // JSON-encoded free-text tags. SQLite has no native string-array column;
+  // the application exposes this as tags when skills are added in a later phase.
+  skills         String          @default("[]")
+  availability   Availability    @default(AVAILABLE)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  deletedAt      DateTime?
+  translationSchedule TranslationScheduleItem[]
+  translationWeeks TranslationArticleWeek[]
+
+  @@index([username])
+  @@index([team])
+}
+
+/** Admin-curated external Gurukul viewing and listening links. No files are
+ * stored or published by this workspace. */
+model LibraryItem {
+  id          String      @id @default(cuid())
+  title       String
+  url         String
+  kind        LibraryKind
+  createdById String
+  createdAt   DateTime    @default(now())
+
+  @@index([kind])
+}
+
+/** Personal Translation-team schedule entries. The owner edits their own
+ * entries; administrators can review them without taking over the schedule. */
+model TranslationScheduleItem {
+  id        String   @id @default(cuid())
+  ownerId   String
+  title     String
+  startsAt  DateTime
+  status    String   @default("not_done")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  doneAt    DateTime?
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@index([startsAt])
+  @@index([status])
+}
+
+/** A translator-owned weekly article plan, based exactly on the supplied
+ * Satvidya article rhythm. The static schedule lives in the UI; only genuine
+ * weekly topic, notes and completion choices are stored. */
+model TranslationArticleWeek {
+  id              String   @id @default(cuid())
+  ownerId         String
+  weekStart       DateTime
+  topic           String?
+  readingList     String   @default("[]")
+  openingDone     Boolean  @default(false)
+  bodyOneTwoDone  Boolean  @default(false)
+  bodyThreeDone   Boolean  @default(false)
+  closingDone     Boolean  @default(false)
+  readAloudDone   Boolean  @default(false)
+  finalRevisionDone Boolean @default(false)
+  submittedArchived Boolean @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  days TranslationArticleDay[]
+
+  @@unique([ownerId, weekStart])
+  @@index([ownerId])
+  @@index([weekStart])
+}
+
+model TranslationArticleDay {
+  id              String   @id @default(cuid())
+  weekId          String
+  /** Monday = 1 through Sunday = 7 */
+  weekday         Int
+  whatDid         String?
+  whatsNext       String?
+  readingProgress String?
+  writingProgress String?
+  listenedDone    Boolean  @default(false)
+  notesCaptured   Boolean  @default(false)
+  readingDone     Boolean  @default(false)
+  writingDone     Boolean  @default(false)
+  deepReadingDone Boolean  @default(false)
+  articleFinalised Boolean @default(false)
+  submitted       Boolean  @default(false)
+  updatedAt       DateTime @updatedAt
+
+  week TranslationArticleWeek @relation(fields: [weekId], references: [id], onDelete: Cascade)
+
+  @@unique([weekId, weekday])
+  @@index([weekId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String
+  action     String
+  targetType String
+  targetId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Events — the object the rest of G Arts hangs from.
+//
+// The team's work is event-driven: a function happens, it is covered,
+// projects are planned, and the completed work remains connected to the event
+// it came from. Everything later in the roadmap points back here.
+// ---------------------------------------------------------------------------
+
+model Event {
+  id       String @id @default(cuid())
+  name     String
+  /**
+   * One of the categories in `events.ts` — kept as text so a new one does
+   * not need a migration.
+   */
+  category String @default("campus")
+  /** Exact recurring-event key supplied by G Arts; blank means no history lookup. */
+  seriesKey String?
+
+  startsAt DateTime
+  endsAt   DateTime?
+  /**
+   * Most school entries are whole-day; times are the exception.
+   */
+  allDay   Boolean   @default(true)
+
+  venue       String?
+  description String?
+
+  /**
+   * planned → confirmed → covered → completed → archived.
+   */
+  status String @default("planned")
+
+  /**
+   * JSON array of coverage keys: photography, videography, live, drone…
+   */
+  coverage String @default("[]")
+
+  /**
+   * Where this came from. An entry pulled from the school's academic calendar
+   * keeps its source id so the same event is never imported twice, and so a
+   * change upstream can be matched to the record here.
+   */
+  sourceKind String?
+  sourceUid  String? @unique
+  /** Official page/calendar URL when one exists. Never inferred. */
+  sourceUrl  String?
+  /** Human-readable record of the confirmation or source used. */
+  sourceNote String?
+  verifiedAt DateTime?
+  verifiedById String?
+
+  /**
+   * The chat channel opened for this event, once someone asks for one.
+   */
+  chatChannelId String?
+
+  createdById String
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  archivedAt  DateTime?
+  completedAt DateTime?
+  /** Status to restore if a completed event is recovered within 15 days. */
+  statusBeforeCompletion String?
+
+  tasks       Task[]
+  delivery    EventDelivery?
+
+  @@index([startsAt])
+  @@index([status])
+  @@index([category])
+}
+
+/**
+ * The small, evidence-backed delivery ledger beside an event. It reflects the
+ * real team tracker without turning publishing into invented project steps.
+ * Each boolean is only a direct not-done/done decision; links remain explicit.
+ */
+model EventDelivery {
+  id                  String   @id @default(cuid())
+  eventId             String   @unique
+  websiteUrl          String?
+  websiteEventCreated Boolean  @default(false)
+  websiteApproved     Boolean  @default(false)
+  parentsShareUrl     String?
+  parentsLinkShared   Boolean  @default(false)
+  parentsShareApproved Boolean @default(false)
+  shortsUrl           String?
+  shortsUploaded      Boolean  @default(false)
+  shortsApproved      Boolean  @default(false)
+  videoUrl            String?
+  videoUploaded       Boolean  @default(false)
+  videoApproved       Boolean  @default(false)
+  videoThumbnailDone  Boolean  @default(false)
+  videoThumbnailApproved Boolean @default(false)
+  videoShareUrl       String?
+  videoSharedToParents Boolean @default(false)
+  videoShareApproved  Boolean  @default(false)
+  updatedAt           DateTime @updatedAt
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Projects and tasks.
+//
+// Projects may exist beside an event's direct work-items. The system never
+// generates a checklist or labels a project as main on its own.
+// ---------------------------------------------------------------------------
+
+model Project {
+  id          String  @id @default(cuid())
+  eventId     String?
+  name        String
+  /**
+   * photo | video | shorts | graphics | website | live | archive
+   */
+  type        String  @default("photo")
+  description String?
+
+  /**
+   * planned → capture → ready_for_edit → editing → review → approved → published → archived
+   */
+  stage String @default("planned")
+
+  dueAt       DateTime?
+  createdById String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  archivedAt  DateTime?
+
+  tasks       Task[]
+
+  @@index([eventId])
+  @@index([stage])
+}
+
+model Task {
+  id         String    @id @default(cuid())
+  projectId  String?
+  eventId    String?
+  title      String
+  /**
+   * not_done | submitted | approved. The requested outcome is stored
+   * separately so Not required also has to pass administrator approval.
+   */
+  status     String    @default("not_done")
+  /** finished | not_required, set before the administrator approves it. */
+  completionKind String?
+  /**
+   * Who it is assigned to — a Workspace user id, or nobody yet.
+   */
+  assigneeId String?
+  dueAt      DateTime?
+  /**
+   * Keeps explicitly named work-items in the order G Arts entered them.
+   */
+  position   Int       @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  doneAt     DateTime?
+  submittedAt DateTime?
+  submittedById String?
+  approvedAt DateTime?
+  approvedById String?
+  notRequiredAt DateTime?
+  notRequiredById String?
+  /** The earlier occurrence this direct work-item was copied from, if any. */
+  copiedFromEventId String?
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  event   Event?   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([eventId])
+  @@index([assigneeId])
+  @@index([status])
+  @@index([copiedFromEventId])
+}

@@ -8,5 +8,5 @@
       "destination": "/index.html"
     }
   ],
-  "installCommand": "G_ARTS_SKIP_POSTINSTALL=1 npm ci --include=dev --no-audit --no-fund"
+  "installCommand": "NODE_ENV=development G_ARTS_SKIP_POSTINSTALL=1 npm ci --no-audit --no-fund"
 }

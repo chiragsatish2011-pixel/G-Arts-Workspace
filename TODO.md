@@ -47,6 +47,8 @@ of these records automatically.
   automatically refreshed library sections.
 - Vercel frontend deployment is explicitly configured in `apps/web/vercel.json`:
   Vite build output is `dist`; unknown client paths return the app shell.
+- A root `vercel.json` provides the identical frontend build when the Vercel
+  project is connected to the repository root instead of `apps/web`.
 
 ## Requirements G Arts needs to supply before the next build slice
 

@@ -45,6 +45,8 @@ of these records automatically.
   visual only: it does not send any extra requests or change live data.
 - Shared Music links are saved permanently. Video and Live are the only
   automatically refreshed library sections.
+- Vercel frontend deployment is explicitly configured in `apps/web/vercel.json`:
+  Vite build output is `dist`; unknown client paths return the app shell.
 
 ## Requirements G Arts needs to supply before the next build slice
 

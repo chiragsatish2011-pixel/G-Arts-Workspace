@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
   "buildCommand": "G_ARTS_SKIP_POSTINSTALL=1 npm install --workspace=@g-arts/web --include-workspace-root --no-audit --no-fund && npm run build --workspace=@g-arts/web",
   "outputDirectory": "dist",
   "rewrites": [

@@ -12,22 +12,17 @@
  * this file through every `node_modules` above it. That finds the package
  * wherever the install decided to put it, with no shell and no PATH involved.
  */
-import { cp, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const repoRoot = path.resolve(appRoot, "..", "..");
 
 /**
- * The bundle is written to `dist/` at the repository root rather than inside
- * the app. Vercel looks for an output directory by name, and a project
- * created from its own detection defaults to "dist" — which took precedence
- * over `outputDirectory` in vercel.json and failed the deploy after a
- * successful build. Building where it already looks means the two cannot
- * disagree again.
+ * Keep the bundle inside the web application. This is the only location that
+ * Vercel can reliably retain when it executes this workspace's build command.
+ * The repository-level Vercel config explicitly points to `apps/web/dist`.
  */
-const outDir = path.join(repoRoot, "dist");
+const outDir = path.join(appRoot, "dist");
 
 let build;
 try {
@@ -42,21 +37,7 @@ try {
   process.exit(1);
 }
 
-// `root` is passed explicitly so the build does not depend on the working
-// directory the caller happened to use.
+// `root` and `outDir` are explicit so the build does not depend on the
+// working directory Vercel or npm chose for the workspace command.
 await build({ root: appRoot, build: { outDir, emptyOutDir: true } });
-
-/**
- * The same bundle is also placed inside the app.
- *
- * Vercel looks for a directory called `dist` relative to whatever Root
- * Directory the project is configured with, and that setting is not in this
- * repository — it lives in the dashboard. A project set to the repository root
- * looks in `./dist`; one set to `apps/web` looks in `apps/web/dist`. Writing
- * both means the deploy succeeds either way instead of failing with "No Output
- * Directory named dist found" after a build that actually worked.
- */
-const appDist = path.join(appRoot, "dist");
-await rm(appDist, { recursive: true, force: true });
-await cp(outDir, appDist, { recursive: true });
-console.log(`\nBundle written to ${path.relative(repoRoot, outDir)}/ and ${path.relative(repoRoot, appDist)}/`);
+console.log("\nBundle written to apps/web/dist/");
